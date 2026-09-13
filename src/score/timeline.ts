@@ -1,7 +1,7 @@
 import type { VerovioToolkit } from 'verovio/esm';
 import type { ExpectedEvent, Staff } from '../types.ts';
 import {
-  buildBeats, buildMeasures, countIn, lastAtOrBefore, metersByMeasure,
+  buildBeats, buildMeasures, countIn, lastAtOrBefore, measureNumbers, metersByMeasure,
   type Beat, type Measure, type TimemapEntry,
 } from './beats.ts';
 
@@ -99,7 +99,7 @@ export function buildTimeline(tk: VerovioToolkit): ScoreTiming {
     ev.offMs = Math.max(ev.offMs, offAt.get(id) ?? ev.offMs);
   }
 
-  const measures = buildMeasures(map, metersByMeasure(mei));
+  const measures = buildMeasures(map, metersByMeasure(mei), measureNumbers(mei));
   const beats = buildBeats(measures, map);
   const sorted = [...events.values()].sort((a, b) => a.onMs - b.onMs || a.pitch - b.pitch);
   for (const ev of sorted) {

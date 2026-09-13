@@ -1,10 +1,12 @@
 import type { Click } from './metronome.ts';
 import type { ScoreTiming } from '../score/timeline.ts';
+import { playWindow, type PlayWindow } from '../score/section.ts';
 import type { NoteEvent } from '../types.ts';
 
 // One tempo-mode run: the clock, the clicks it needs, and the raw recording.
 // Real time is performance.now() ms; score time is ms at 1.0×.
-// score time = (real − t0) × speed.
+// score time = (real − t0) × speed. t0 is when score time 0 would be, even
+// when the run plays a section that starts later (see score/section.ts).
 
 export type RunPhase = 'countIn' | 'playing' | 'finished';
 
@@ -18,21 +20,24 @@ export class TempoRun {
   readonly timing: ScoreTiming;
   readonly speed: number;
   readonly latencyMs: number;
+  readonly window: PlayWindow;
   stoppedAt: number | undefined;
 
-  constructor(timing: ScoreTiming, speed: number, latencyMs = 0, now = performance.now()) {
+  constructor(timing: ScoreTiming, speed: number, latencyMs = 0, window = playWindow(timing), now = performance.now()) {
     this.timing = timing;
     this.speed = speed;
     this.latencyMs = latencyMs;
-    const firstClick = timing.countIn[0]?.t ?? 0;
-    this.t0 = now + LEAD_MS - Math.min(0, firstClick) / speed;
+    this.window = window;
+    const firstClick = Math.min(window.startMs, window.countIn[0]?.t ?? window.startMs);
+    this.t0 = now + LEAD_MS - firstClick / speed;
+    const beats = timing.beats.filter((b) => b.t >= window.startMs - 1e-6 && b.t < window.endMs - 1e-6);
     this.clicks = [
-      ...timing.countIn.map((c) => ({ at: this.realAt(c.t), accent: c.accent, always: true })),
-      ...timing.beats.map((b) => ({ at: this.realAt(b.t), accent: b.downbeat, always: false })),
+      ...window.countIn.map((c) => ({ at: this.realAt(c.t), accent: c.accent, always: true })),
+      ...beats.map((b) => ({ at: this.realAt(b.t), accent: b.downbeat, always: false })),
     ];
-    const lastBeat = timing.beats.at(-1), prevBeat = timing.beats.at(-2);
+    const lastBeat = beats.at(-1) ?? timing.beats.at(-1), prevBeat = beats.at(-2) ?? timing.beats.at(-2);
     const beatMs = lastBeat && prevBeat ? lastBeat.t - prevBeat.t : 500;
-    this.endScoreMs = timing.endMs + beatMs;
+    this.endScoreMs = window.endMs + beatMs;
   }
 
   realAt(scoreMs: number) { return this.t0 + scoreMs / this.speed; }
@@ -41,12 +46,12 @@ export class TempoRun {
   phase(now = performance.now()): RunPhase {
     if (this.stoppedAt !== undefined) return 'finished';
     const t = this.scoreTime(now);
-    return t < 0 ? 'countIn' : t > this.endScoreMs ? 'finished' : 'playing';
+    return t < this.window.startMs ? 'countIn' : t > this.endScoreMs ? 'finished' : 'playing';
   }
 
   // Count-in clicks still to come (for the "3 · 2 · 1" display).
   countInLeft(now = performance.now()) {
-    return this.timing.countIn.filter((c) => this.realAt(c.t) > now).length;
+    return this.window.countIn.filter((c) => this.realAt(c.t) > now).length;
   }
 
   record(ev: NoteEvent) {

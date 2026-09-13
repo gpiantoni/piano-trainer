@@ -16,6 +16,7 @@ export type Meter = { count: number; unit: number };
 
 export type Measure = {
   id: string;
+  n: string;            // printed bar number (MEI @n): a pickup is usually 0
   startMs: number;
   endMs: number;
   startQ: number;
@@ -31,6 +32,17 @@ const EPS = 1e-6;
 const compound = (m: Meter) => m.unit >= 8 && m.count > 3 && m.count % 3 === 0;
 export const beatQ = (m: Meter) => (compound(m) ? 3 : 1) * (4 / m.unit);
 export const beatsPerBar = (m: Meter) => (compound(m) ? m.count / 3 : m.count);
+
+// measure id -> printed bar number.
+export function measureNumbers(mei: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [tag] of mei.matchAll(/<measure\b[^>]*>/g)) {
+    const id = tag.match(/xml:id="([^"]+)"/)?.[1];
+    const n = tag.match(/\sn="([^"]+)"/)?.[1];
+    if (id && n) out.set(id, n);
+  }
+  return out;
+}
 
 // measure id -> meter in effect. Meters come from <meterSig> or the older
 // meter.count/meter.unit attributes on scoreDef/staffDef, in document order.
@@ -76,7 +88,7 @@ export function qToMs(map: TimemapEntry[]): (q: number) => number {
   };
 }
 
-export function buildMeasures(map: TimemapEntry[], meters: Map<string, Meter>): Measure[] {
+export function buildMeasures(map: TimemapEntry[], meters: Map<string, Meter>, numbers = new Map<string, string>()): Measure[] {
   const toMs = qToMs(map);
   const lastQ = map.reduce((m, e) => Math.max(m, e.qstamp), 0);
   const starts = map.filter((e) => e.measureOn);
@@ -86,7 +98,8 @@ export function buildMeasures(map: TimemapEntry[], meters: Map<string, Meter>): 
     const startQ = e.qstamp;
     let endQ = starts[i + 1]?.qstamp ?? lastQ;
     if (endQ <= startQ + EPS) endQ = startQ + beatsPerBar(meter) * beatQ(meter);
-    return { id: e.measureOn!, startQ, endQ, startMs: toMs(startQ), endMs: toMs(endQ), meter };
+    const id = e.measureOn!;
+    return { id, n: numbers.get(id) ?? String(i + 1), startQ, endQ, startMs: toMs(startQ), endMs: toMs(endQ), meter };
   });
 }
 

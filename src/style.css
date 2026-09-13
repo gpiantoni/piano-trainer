@@ -209,3 +209,14 @@ body.reviewing { padding-bottom: 8.5rem; }
 .lib-list li { display: flex; align-items: center; gap: .5rem; padding: .3rem 0; border-top: 1px solid var(--line); }
 .lib-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .lib-name small { color: var(--muted); }
+
+/* ---- sections ------------------------------------------------------------------ */
+
+.bar-mark {
+  position: absolute;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--cursor) 16%, transparent);
+  border: 2px solid var(--cursor);
+  border-radius: .3rem;
+}
+#bars[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }

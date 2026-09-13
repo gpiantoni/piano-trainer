@@ -14,9 +14,16 @@ export type AlignOptions = {
   reference: TimingReference;   // what deltaPct is a percentage of
   hands: Hands;                 // notes of the other hand are aligned but not reported
   untilMs: number;              // run stopped here (real ms from t0): later notes are not reported
+  // Only notes starting in [startMs, endMs) (score ms at 1.0×) are reported: a
+  // section of bars. Alignment still uses the whole timeline, so a key played
+  // for a note just outside the section pairs with that note, not with one inside.
+  window: { startMs: number; endMs: number };
 };
 
-export const DEFAULT_ALIGN: AlignOptions = { maxOffsetBeats: 1, reference: 'beat', hands: 'both', untilMs: Infinity };
+export const DEFAULT_ALIGN: AlignOptions = {
+  maxOffsetBeats: 1, reference: 'beat', hands: 'both', untilMs: Infinity,
+  window: { startMs: -Infinity, endMs: Infinity },
+};
 
 export type Alignment = { notes: PlayedNote[]; extras: Extra[] };
 
@@ -114,7 +121,9 @@ export function align(
 
   const inHand = (e: ExpectedEvent) => opts.hands === 'both' || e.staff === (opts.hands === 'right' ? 1 : 2);
   const reached = (e: ExpectedEvent) => e.onMs / speed <= opts.untilMs || played.has(e);
-  const notes: PlayedNote[] = events.filter((e) => inHand(e) && reached(e)).map((expected) => {
+  const { startMs, endMs } = opts.window;
+  const inWindow = (e: ExpectedEvent) => e.onMs >= startMs - 1e-6 && e.onMs < endMs - 1e-6;
+  const notes: PlayedNote[] = events.filter((e) => inHand(e) && inWindow(e) && reached(e)).map((expected) => {
     const press = played.get(expected);
     if (!press) return { expected, status: 'missed' };
     const at = expected.onMs / speed;
@@ -137,8 +146,11 @@ export function align(
     };
   });
 
+  // Unmatched keys count as extras only around the section: not during the
+  // count-in, nor after its end. One match window of slack on each side.
+  const slack = (opts.maxOffsetBeats * (notes[0]?.expected.beatMs ?? 0)) / speed;
   const extras: Extra[] = presses
-    .filter((p) => !used.has(p))
+    .filter((p) => !used.has(p) && p.on >= startMs / speed - slack && p.on < endMs / speed + slack)
     .map((p) => ({ pitch: p.pitch, onsetMs: p.on, velocity: p.velocity }));
 
   // A missed note with an unmatched key a semitone or two away, in its window:

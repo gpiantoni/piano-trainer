@@ -12,6 +12,10 @@ import { ReviewView } from './review/view.ts';
 import type { Hands, NoteEvent } from './types.ts';
 import { getScore, listScores } from './library/db.ts';
 import { LibraryDialog } from './library/dialog.ts';
+import {
+  formatSection, inWindow, parseSection, playWindow, sectionFrom, sectionLabel,
+  type PlayWindow, type Section,
+} from './score/section.ts';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
@@ -32,6 +36,10 @@ app.innerHTML = `
       <button data-hands="left" role="radio">Left</button>
       <button data-hands="right" role="radio">Right</button>
     </div>
+    <span class="group">
+      <button id="bars" title="Practise some bars: tap the first bar, then the last">Bars</button>
+      <button id="barsClear" aria-label="Whole piece" title="Whole piece" hidden>✕</button>
+    </span>
     <span id="waitControls" class="group">
       <button id="restart">Restart</button>
     </span>
@@ -54,6 +62,7 @@ app.innerHTML = `
     </span>
   </header>
   <p id="status" class="status"></p>
+  <p id="barsHint" class="status hint" aria-live="polite" hidden></p>
   <p id="libHint" class="status hint" hidden>Add your own scores: <b>Library</b> → Add files or Link folder.</p>
   <p id="waitFeedback" class="wait-feedback" aria-live="polite" hidden></p>
   <div id="score" class="score"></div>
@@ -113,9 +122,13 @@ let practice: WaitMode | undefined;
 let run: TempoRun | undefined;
 let cursorMap: CursorMap | undefined;
 let latencyMs = Number(store.get('latencyMs')) || 0;
+let section: Section | undefined;   // some bars only; remembered per score
 
 // The last finished tempo run, kept for re-analysis and download.
-type LastRun = { recording: NoteEvent[]; speed: number; latencyMs: number; recordedAt: string; untilMs: number };
+type LastRun = {
+  recording: NoteEvent[]; speed: number; latencyMs: number; recordedAt: string; untilMs: number;
+  window: PlayWindow;
+};
 let lastRun: LastRun | undefined;
 
 const metronome = new Metronome();
@@ -138,7 +151,10 @@ let followedSystem: Element | null = null;
 function paint() {
   const states = mode === 'wait' ? practice?.noteStates() : undefined;
   const inPlay = forHands(hands);
-  const muted = new Set(timing?.events.filter((ev) => !inPlay(ev)).flatMap((ev) => [ev.id, ...ev.tiedIds]));
+  const w = timing && playWindow(timing, section);
+  const muted = new Set(timing?.events
+    .filter((ev) => !inPlay(ev) || !inWindow(w!, ev.onMs))
+    .flatMap((ev) => [ev.id, ...ev.tiedIds]));
   for (const [id, el] of noteEls) {
     const s = states?.get(id);
     el.classList.toggle('hit', s === 'hit');
@@ -215,17 +231,128 @@ function onNote(ev: NoteEvent) {
   follow();
 }
 
+// The notes wait mode asks for: the section's, or the whole piece.
+function practiceEvents(t: ScoreTiming) {
+  const w = playWindow(t, section);
+  return t.events.filter((ev) => inWindow(w, ev.onMs));
+}
+
+// Back to where playing starts: the top, or the line with the section's first bar.
+function scrollToStart() {
+  followedSystem = null;
+  const first = section && timing?.measures[section.from];
+  const system = first && document.getElementById(first.id)?.closest('g.system');
+  if (system) scrollToSystem(system, true);
+  else window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function restart() {
   stopRun();
   review.clear();
   lastRun = undefined;
-  if (timing) practice = new WaitMode(timing.events, hands);
+  if (timing) practice = new WaitMode(practiceEvents(timing), hands);
   clearWaitFeedback();
   paint();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-  followedSystem = null;
+  scrollToStart();
 }
 $('restart').onclick = restart;
+
+// ---- sections: some bars only ----------------------------------------------
+
+const barsButton = $<HTMLButtonElement>('bars');
+const barsHint = $('barsHint');
+const barMark = Object.assign(document.createElement('div'), { className: 'bar-mark', hidden: true });
+
+// Picking a section: undefined when not picking; `first` after the first tap.
+let picking: { first?: number } | undefined;
+
+function showSection() {
+  barsButton.textContent = section && timing ? sectionLabel(timing, section) : 'Bars';
+  barsButton.setAttribute('aria-pressed', String(!!picking));
+  $('barsClear').hidden = !section;
+  barsHint.hidden = !picking;
+  barsHint.textContent = !picking ? ''
+    : picking.first === undefined ? 'Tap the first bar of the section.'
+    : `${sectionLabel(timing!, { from: picking.first, to: picking.first })} — now tap the last bar.`;
+}
+
+function setSection(next: Section | undefined) {
+  section = next;
+  if (loaded) store.set(`section:${loaded.id}`, next ? formatSection(next) : '');
+  showSection();
+  restart();
+}
+
+function endPicking() {
+  picking = undefined;
+  barMark.hidden = true;
+  showSection();
+}
+
+// The bar under a tap. Taps land on white paper as often as on ink, so test
+// against each bar's box (staves only, plus some room above and below) rather
+// than the element that was hit.
+function measureAt(x: number, y: number): number {
+  let best = -1, bestDist = Infinity;
+  timing?.measures.forEach((m, i) => {
+    const r = staffBox(document.getElementById(m.id));
+    if (!r || x < r.left || x > r.right) return;
+    const dist = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+    if (dist < 60 && dist < bestDist) { best = i; bestDist = dist; }
+  });
+  return best;
+}
+
+function staffBox(el: Element | null) {
+  if (!el) return undefined;
+  const staves = [...el.querySelectorAll(':scope > g.staff')].map((s) => s.getBoundingClientRect());
+  if (staves.length === 0) return el.getBoundingClientRect();
+  return {
+    left: Math.min(...staves.map((s) => s.left)), right: Math.max(...staves.map((s) => s.right)),
+    top: Math.min(...staves.map((s) => s.top)), bottom: Math.max(...staves.map((s) => s.bottom)),
+  };
+}
+
+function placeBarMark() {
+  const m = picking?.first !== undefined ? timing?.measures[picking.first] : undefined;
+  const r = m && staffBox(document.getElementById(m.id));
+  barMark.hidden = !r;
+  if (!r) return;
+  const base = score.getBoundingClientRect();
+  Object.assign(barMark.style, {
+    left: `${r.left - base.left}px`, top: `${r.top - base.top - 8}px`,
+    width: `${r.right - r.left}px`, height: `${r.bottom - r.top + 16}px`,
+  });
+}
+
+barsButton.onclick = () => {
+  if (picking) return endPicking();
+  if (!timing) return;
+  stopRun();
+  review.clear();
+  lastRun = undefined;
+  picking = {};
+  showSection();
+};
+$('barsClear').onclick = () => { endPicking(); setSection(undefined); };
+
+// Capture phase: while picking, a tap chooses a bar and does nothing else
+// (no review popover).
+score.addEventListener('click', (e) => {
+  if (!picking) return;
+  e.stopPropagation();
+  const i = measureAt(e.clientX, e.clientY);
+  if (i < 0) return;
+  if (picking.first === undefined) {
+    picking.first = i;
+    placeBarMark();
+    showSection();
+    return;
+  }
+  const next = sectionFrom(picking.first, i);
+  endPicking();
+  setSection(next);
+}, true);
 
 // ---- tempo mode -------------------------------------------------------------
 
@@ -234,7 +361,7 @@ cursor.className = 'cursor';
 cursor.hidden = true;
 
 function cursorSystem() {
-  const pos = run && cursorMap?.position(Math.max(0, run.scoreTime()));
+  const pos = run && cursorMap?.position(Math.max(run.window.startMs, run.scoreTime()));
   return pos ? cursorMap!.systems[pos.system].el : null;
 }
 
@@ -255,7 +382,7 @@ async function startRun() {
   review.clear();
   lastRun = undefined;
   await metronome.prepare();          // inside the tap: audio may start
-  run = new TempoRun(timing, speed, latencyMs);
+  run = new TempoRun(timing, speed, latencyMs, playWindow(timing, section));
   metronome.play(run.clicks);
   followedSystem = null;
   wakeLock = await navigator.wakeLock?.request('screen').catch(() => undefined);
@@ -270,7 +397,7 @@ function tick() {
   const phase = run.phase(now);
   if (phase === 'finished') return finishRun();
   const t = run.scoreTime(now);
-  drawCursor(Math.max(0, t));
+  drawCursor(Math.max(run.window.startMs, t));
   if (phase === 'countIn') {
     const left = run.countInLeft(now);
     feedback.textContent = left > 0 ? `${left}` : '';
@@ -297,30 +424,31 @@ function stopRun() {
 
 function finishRun() {
   const finished = run;
-  const reachedMusic = finished && finished.scoreTime() > 0;
+  const reachedMusic = finished && finished.scoreTime() > finished.window.startMs;
   const untilMs = finished ? performance.now() - finished.t0 : 0;
   stopRun();
   if (!finished || !reachedMusic) return;
   lastRun = {
     recording: finished.recording, speed: finished.speed, untilMs,
-    latencyMs: finished.latencyMs, recordedAt: new Date().toISOString(),
+    latencyMs: finished.latencyMs, recordedAt: new Date().toISOString(), window: finished.window,
   };
   analyse();
   startStop.textContent = 'Play again';
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  scrollToStart();
 }
 
 // Align the last run to the score with the current review settings.
 function analyse() {
   if (!lastRun || !timing) return;
   const { maxOffsetBeats, reference } = review.settings;
-  const { recording, speed: runSpeed, untilMs } = lastRun;
-  review.show(align(timing.events, recording, runSpeed, { maxOffsetBeats, reference, hands, untilMs }), runSpeed);
+  const { recording, speed: runSpeed, untilMs, window } = lastRun;
+  review.show(align(timing.events, recording, runSpeed, { maxOffsetBeats, reference, hands, untilMs, window }), runSpeed);
 }
 
 function downloadRun() {
   if (!lastRun || !loaded || !timing) return;
-  const data = { score: loaded.id, title: loaded.title, bpm: timing.bpm, hands, ...lastRun };
+  const bars = lastRun.window.section ? sectionLabel(timing, lastRun.window.section) : 'all';
+  const data = { score: loaded.id, title: loaded.title, bpm: timing.bpm, hands, bars, ...lastRun };
   const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }));
   const a = Object.assign(document.createElement('a'), {
     href: url, download: `${loaded.title} ${lastRun.recordedAt.slice(0, 16).replace(':', '')}.json`,
@@ -455,7 +583,8 @@ for (const b of handButtons) b.onclick = () => setHands(b.dataset.hands as Hands
 
 // Space starts/stops a tempo run from a computer keyboard.
 document.addEventListener('keydown', (e) => {
-  if (e.code !== 'Space' || mode !== 'tempo' || calib.open || library.dialog.open || (e.target as HTMLElement).matches('select, input')) return;
+  if (e.code === 'Escape' && picking) { endPicking(); return; }
+  if (e.code !== 'Space' || mode !== 'tempo' || picking || calib.open || library.dialog.open || (e.target as HTMLElement).matches('select, input')) return;
   e.preventDefault();
   startStop.click();
 });
@@ -482,7 +611,8 @@ async function layout(mine?: number) {
   const pages = await layoutScore(width, scale);
   if (mine !== seq) return;
   score.innerHTML = pages.join('');
-  score.append(cursor);
+  score.append(cursor, barMark);
+  placeBarMark();
   laidOutWidth = width;
   noteEls = new Map([...score.querySelectorAll('g.note')].map((el) => [el.id, el]));
   cursorMap = new CursorMap(score, timing);
@@ -505,7 +635,9 @@ async function show(entry: ScoreEntry) {
     if (mine !== seq) return;
     loaded = entry;
     timing = t;
-    practice = new WaitMode(timing.events, hands);
+    section = parseSection(store.get(`section:${entry.id}`), t.measures.length);
+    showSection();
+    practice = new WaitMode(practiceEvents(t), hands);
     setBpm(Number(store.get(`bpm:${entry.id}`)) || scoreBpm(timing));
     clearFeedback();
     clearWaitFeedback();
@@ -513,6 +645,7 @@ async function show(entry: ScoreEntry) {
     // A resize may have re-flowed meanwhile; that still shows this score.
     if (loaded !== entry) return;
     window.scrollTo(0, 0);
+    if (section) scrollToStart();
     status.textContent = entry.composer ? `${entry.title} — ${entry.composer}` : entry.title;
     store.set('score', entry.id);
   } catch (err) {
@@ -632,7 +765,11 @@ if (import.meta.env.DEV) {
     // `untilMs` (real ms from t0) simulates stopping the run early.
     __replay: (recording: NoteEvent[], runSpeed = speed, untilMs = Infinity) => {
       if (mode !== 'tempo') setMode('tempo');
-      lastRun = { recording, speed: runSpeed, latencyMs: 0, recordedAt: new Date().toISOString(), untilMs };
+      if (!timing) return;
+      lastRun = {
+        recording, speed: runSpeed, latencyMs: 0, recordedAt: new Date().toISOString(), untilMs,
+        window: playWindow(timing, section),
+      };
       analyse();
     },
     __timing: () => timing,

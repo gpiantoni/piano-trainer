@@ -13,7 +13,7 @@ Plug the piano into the **laptop** (Chrome on Linux supports Web MIDI, and
 ```bash
 npm install
 npm run dev      # http://localhost:5173
-npm test         # alignment, calibration and library tests (Node, no browser)
+npm test         # alignment, calibration, library and section tests (Node, no browser)
 ```
 
 - `http://localhost:5173/spike.html` — the MIDI debugger. Lists inputs, logs every
@@ -54,6 +54,11 @@ npm test         # alignment, calibration and library tests (Node, no browser)
   raw recording as JSON. **⏱** calibrates latency: tap along with 8 clicks once
   per device.
 
+  **Bars** practises a section: tap the first bar, then the last (either order).
+  The other bars go grey; wait mode starts at the first bar, and a tempo run
+  counts in one bar before it and stops after the last. Remembered per score;
+  **✕** goes back to the whole piece.
+
   **Both / Left / Right** picks the hand in either mode: the other staff greys
   out and is not asked for. **Full screen** hides the browser bars on the tablet.
 
@@ -93,8 +98,9 @@ development and not for the deployed build.
 | 7 | Align recording to score (pure, tested) ✅ | late / missed / wrong key / staccato read correctly |
 | 8 | Review in four colour layers: notes, timing, duration, velocity ✅ | measurements, not grades |
 | 9 | Score library: add files / link a folder from the device ✅ | tablet imports a MuseScore export, rescan picks up changes |
-| 10 | Summary + saved sessions | trend across runs, backup export/import |
-| 11 | PWA on the tablet | offline, home-screen icon, share a score to the app |
-| 12 | Loops, tempo ramp | — |
+| 10 | Play a section: some bars only ✅ | two taps pick the bars; count-in, run and review cover only them |
+| 11 | Summary + saved sessions | trend across runs, backup export/import |
+| 12 | PWA on the tablet | offline, home-screen icon, share a score to the app |
+| 13 | Continuous loops, tempo ramp | — |
 
 Full plan: `~/.claude/plans/i-have-a-midi-shimmering-candy.md`
