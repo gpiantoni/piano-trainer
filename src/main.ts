@@ -1,8 +1,12 @@
 import './style.css';
 import { fetchManifest, layoutScore, loadScore, type ScoreEntry } from './score/load.ts';
+import type { ScoreTiming } from './score/timeline.ts';
+import { CursorMap } from './score/cursor.ts';
 import { listenMidi } from './midi/input.ts';
-import { WaitMode, noteName, type Feedback } from './engine/waitMode.ts';
-import type { ExpectedEvent, Hands, NoteEvent } from './types.ts';
+import { WaitMode, forHands, noteName, type Feedback } from './engine/waitMode.ts';
+import { Metronome } from './engine/metronome.ts';
+import { TempoRun } from './engine/tempoRun.ts';
+import type { Hands, NoteEvent } from './types.ts';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
@@ -13,16 +17,31 @@ app.innerHTML = `
       <output id="zoomLevel"></output>
       <button id="zoomIn" aria-label="Larger">+</button>
     </div>
-    <div class="hands" role="radiogroup" aria-label="Hands">
+    <div class="seg" id="modes" role="radiogroup" aria-label="Mode">
+      <button data-mode="wait" role="radio">Wait</button>
+      <button data-mode="tempo" role="radio">Tempo</button>
+    </div>
+    <div class="seg" id="hands" role="radiogroup" aria-label="Hands">
       <button data-hands="both" role="radio">Both</button>
       <button data-hands="right" role="radio">Right</button>
       <button data-hands="left" role="radio">Left</button>
     </div>
-    <button id="restart">Restart</button>
-    <button id="fullscreen" hidden>Full screen</button>
+    <span id="waitControls" class="group">
+      <button id="restart">Restart</button>
+    </span>
+    <span id="tempoControls" class="group" hidden>
+      <span class="zoom" role="group" aria-label="Speed">
+        <button id="slower" aria-label="Slower">−</button>
+        <output id="speed" class="speed"></output>
+        <button id="faster" aria-label="Faster">+</button>
+      </span>
+      <button id="click" role="switch" aria-label="Metronome">🔔</button>
+      <button id="startStop" class="primary">Start</button>
+    </span>
     <span id="progress" class="progress"></span>
     <span id="feedback" class="feedback" aria-live="polite"></span>
     <span class="end">
+      <button id="fullscreen" hidden>Full screen</button>
       <span id="midi" class="midi"></span>
       <a class="debug" href="${import.meta.env.BASE_URL}spike.html">MIDI debugger</a>
     </span>
@@ -36,25 +55,40 @@ const picker = $<HTMLSelectElement>('picker');
 const status = $('status');
 const score = $('score');
 const feedback = $('feedback');
+const startStop = $<HTMLButtonElement>('startStop');
 
 // localStorage can throw (private mode, blocked storage); the app works without it.
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
 };
+const oneOf = <T extends string>(options: readonly T[], value: string | null, fallback: T) =>
+  options.find((o) => o === value) ?? fallback;
 
 // Notation size is verovio's `scale`. Changing it re-flows the bars, so a larger
 // size means fewer bars per line, never horizontal scrolling. Tune on the tablet.
 const SCALE_MIN = 20, SCALE_MAX = 100, SCALE_STEP = 5;
 let scale = Number(store.get('scale')) || 45;
 
+// Practice speed, as a fraction of the score's tempo.
+const SPEED_MIN = 0.4, SPEED_MAX = 1.5, SPEED_STEP = 0.05;
+let speed = Number(store.get('speed')) || 1;
+
+type Mode = 'wait' | 'tempo';
+let mode: Mode = oneOf(['wait', 'tempo'], store.get('mode'), 'wait');
+let hands: Hands = oneOf(['both', 'right', 'left'], store.get('hands'), 'both');
+
 let entries: ScoreEntry[] = [];
 let loaded: ScoreEntry | undefined;
 let seq = 0;                        // drops a slow render superseded by a newer one
 let laidOutWidth = 0;
+let timing: ScoreTiming | undefined;
 let practice: WaitMode | undefined;
-let timeline: ExpectedEvent[] = [];
-let hands: Hands = (['both', 'right', 'left'] as const).find((h) => h === store.get('hands')) ?? 'both';
+let run: TempoRun | undefined;
+let cursorMap: CursorMap | undefined;
+
+const metronome = new Metronome();
+metronome.enabled = store.get('click') !== 'off';
 
 // ---- painting -------------------------------------------------------------
 
@@ -62,27 +96,36 @@ let noteEls = new Map<string, Element>();
 let followedSystem: Element | null = null;
 
 function paint() {
-  const states = practice?.noteStates() ?? new Map();
+  const states = mode === 'wait' ? practice?.noteStates() : undefined;
+  const inPlay = forHands(hands);
+  const muted = new Set(timing?.events.filter((ev) => !inPlay(ev)).flatMap((ev) => [ev.id, ...ev.tiedIds]));
   for (const [id, el] of noteEls) {
-    const s = states.get(id);
+    const s = states?.get(id);
     el.classList.toggle('hit', s === 'hit');
-    el.classList.toggle('muted', s === 'muted');
+    el.classList.toggle('muted', muted.has(id));
   }
-  $('progress').textContent = !practice ? ''
+  $('progress').textContent = mode !== 'wait' || !practice ? ''
     : practice.done ? `Done · ${practice.wrong} wrong`
     : `${practice.cursor + 1} / ${practice.chords.length} · ${practice.wrong} wrong`;
 }
 
-// Keep the line being played in view, just below the sticky bar. Scrolls only
-// when the current chord moves to another system, so the page does not twitch.
-function follow(force = false) {
-  const ev = practice?.current?.events[0];
-  const system = ev ? noteEls.get(ev.id)?.closest('g.system') ?? null : null;
+// Bring a line of music to just below the sticky bar. Only when the line
+// changes, so the page does not twitch.
+function scrollToSystem(system: Element | null, force = false) {
   if (!system || (system === followedSystem && !force)) return;
   followedSystem = system;
   const barBottom = document.querySelector('.bar')!.getBoundingClientRect().bottom;
   const top = system.getBoundingClientRect().top;
   window.scrollBy({ top: top - barBottom - 12, behavior: 'smooth' });
+}
+
+function follow(force = false) {
+  if (mode === 'tempo') {
+    if (run) scrollToSystem(cursorSystem(), force);
+    return;
+  }
+  const ev = practice?.current?.events[0];
+  scrollToSystem(ev ? noteEls.get(ev.id)?.closest('g.system') ?? null : null, force);
 }
 
 function clearFeedback() {
@@ -105,7 +148,13 @@ function flashWrong(f: Extract<Feedback, { kind: 'wrong' }>) {
   }, 600);
 }
 
+// ---- wait mode --------------------------------------------------------------
+
 function onNote(ev: NoteEvent) {
+  if (mode === 'tempo') {
+    run?.record(ev);
+    return;
+  }
   if (!practice) return;
   const out = practice.handle(ev);
   if (out.length === 0) return;
@@ -118,8 +167,8 @@ function onNote(ev: NoteEvent) {
 }
 
 function restart() {
-  if (!practice) return;
-  practice.restart();
+  stopRun();
+  if (timing) practice = new WaitMode(timing.events, hands);
   clearFeedback();
   paint();
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -127,18 +176,130 @@ function restart() {
 }
 $('restart').onclick = restart;
 
+// ---- tempo mode -------------------------------------------------------------
+
+const cursor = document.createElement('div');
+cursor.className = 'cursor';
+cursor.hidden = true;
+
+function cursorSystem() {
+  const pos = run && cursorMap?.position(Math.max(0, run.scoreTime()));
+  return pos ? cursorMap!.systems[pos.system].el : null;
+}
+
+function drawCursor(scoreMs: number) {
+  const pos = cursorMap?.position(scoreMs);
+  cursor.hidden = !pos;
+  if (!pos) return;
+  cursor.style.height = `${pos.bottom - pos.top}px`;
+  cursor.style.transform = `translate(${pos.x}px, ${pos.top}px)`;
+}
+
+let wakeLock: WakeLockSentinel | undefined;
+let frame = 0;
+
+async function startRun() {
+  if (!timing || run) return;
+  clearFeedback();
+  await metronome.prepare();          // inside the tap: audio may start
+  run = new TempoRun(timing, speed);
+  metronome.play(run.clicks);
+  followedSystem = null;
+  wakeLock = await navigator.wakeLock?.request('screen').catch(() => undefined);
+  startStop.textContent = 'Stop';
+  startStop.classList.add('running');
+  frame = requestAnimationFrame(tick);
+}
+
+function tick() {
+  if (!run) return;
+  const now = performance.now();
+  const phase = run.phase(now);
+  if (phase === 'finished') return finishRun();
+  const t = run.scoreTime(now);
+  drawCursor(Math.max(0, t));
+  if (phase === 'countIn') {
+    const left = run.countInLeft(now);
+    feedback.textContent = left > 0 ? `${left}` : '';
+    feedback.className = 'feedback count';
+  } else if (feedback.classList.contains('count')) {
+    clearFeedback();
+  }
+  follow();
+  frame = requestAnimationFrame(tick);
+}
+
+function stopRun() {
+  cancelAnimationFrame(frame);
+  metronome.stop();
+  run?.stop();
+  run = undefined;
+  wakeLock?.release().catch(() => undefined);
+  wakeLock = undefined;
+  startStop.textContent = 'Start';
+  startStop.classList.remove('running');
+  cursor.hidden = true;
+  if (feedback.classList.contains('count')) clearFeedback();
+}
+
+function finishRun() {
+  stopRun();
+  feedback.textContent = 'Finished';
+  feedback.className = 'feedback good';
+}
+
+startStop.onclick = () => (run ? finishRun() : startRun());
+
+function setSpeed(next: number) {
+  speed = Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, next)) * 100) / 100;
+  store.set('speed', String(speed));
+  const bpm = timing ? ` · ♩ ${Math.round(timing.bpm * speed)}` : '';
+  $('speed').textContent = `${Math.round(speed * 100)} %${bpm}`;
+}
+$('slower').onclick = () => setSpeed(speed - SPEED_STEP);
+$('faster').onclick = () => setSpeed(speed + SPEED_STEP);
+
+const clickButton = $<HTMLButtonElement>('click');
+function setClick(on: boolean) {
+  metronome.enabled = on;
+  store.set('click', on ? 'on' : 'off');
+  clickButton.setAttribute('aria-checked', String(on));
+  clickButton.textContent = on ? '🔔' : '🔕';
+  clickButton.title = on ? 'Metronome on (count-in always clicks)' : 'Metronome off (count-in still clicks)';
+}
+clickButton.onclick = () => setClick(!metronome.enabled);
+setClick(metronome.enabled);
+
+// ---- mode and hands ---------------------------------------------------------
+
+const modeButtons = [...document.querySelectorAll<HTMLButtonElement>('#modes button')];
+function setMode(next: Mode) {
+  stopRun();
+  mode = next;
+  store.set('mode', mode);
+  for (const b of modeButtons) b.setAttribute('aria-checked', String(b.dataset.mode === mode));
+  $('waitControls').hidden = mode !== 'wait';
+  $('tempoControls').hidden = mode !== 'tempo';
+  restart();
+}
+for (const b of modeButtons) b.onclick = () => setMode(b.dataset.mode as Mode);
+
 // One hand only: the other staff greys out and is not asked for. Starts over.
-const handButtons = [...document.querySelectorAll<HTMLButtonElement>('.hands button')];
+const handButtons = [...document.querySelectorAll<HTMLButtonElement>('#hands button')];
 function setHands(next: Hands) {
   hands = next;
   store.set('hands', hands);
   for (const b of handButtons) b.setAttribute('aria-checked', String(b.dataset.hands === hands));
-  if (!loaded) return;
-  practice = new WaitMode(timeline, hands);
   restart();
 }
 for (const b of handButtons) b.onclick = () => setHands(b.dataset.hands as Hands);
-setHands(hands);
+
+// Space starts/stops a tempo run from a computer keyboard.
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' || mode !== 'tempo' || (e.target as HTMLElement).matches('select, input')) return;
+  e.preventDefault();
+  startStop.click();
+});
 
 // Full screen hides the browser's address bar on the tablet. Not every browser
 // can do it for a page (iPhone Safari), so the button only appears where it works.
@@ -156,27 +317,31 @@ if (document.fullscreenEnabled) {
 // ---- layout ---------------------------------------------------------------
 
 async function layout(mine?: number) {
-  if (!loaded) return;
+  if (!loaded || !timing) return;
   mine ??= ++seq;
   const width = score.clientWidth;
   const pages = await layoutScore(width, scale);
   if (mine !== seq) return;
   score.innerHTML = pages.join('');
+  score.append(cursor);
   laidOutWidth = width;
   noteEls = new Map([...score.querySelectorAll('g.note')].map((el) => [el.id, el]));
+  cursorMap = new CursorMap(score, timing);
   followedSystem = null;
   paint();
 }
 
 async function show(entry: ScoreEntry) {
   const mine = ++seq;
+  stopRun();
   status.textContent = `Loading ${entry.title}…`;
   try {
-    const events = await loadScore(entry);
+    const t = await loadScore(entry);
     if (mine !== seq) return;
     loaded = entry;
-    timeline = events;
-    practice = new WaitMode(timeline, hands);
+    timing = t;
+    practice = new WaitMode(timing.events, hands);
+    setSpeed(speed);
     clearFeedback();
     await layout(mine);
     // A resize may have re-flowed meanwhile; that still shows this score.
@@ -187,7 +352,9 @@ async function show(entry: ScoreEntry) {
   } catch (err) {
     if (mine !== seq && loaded !== entry) return;
     loaded = undefined;
+    timing = undefined;
     practice = undefined;
+    cursorMap = undefined;
     score.innerHTML = '';
     paint();
     status.textContent = `Could not render ${entry.title}: ${(err as Error).message}`;
@@ -237,10 +404,16 @@ if (import.meta.env.DEV) {
   Object.assign(window, {
     __play: (pitch: number) => onNote({ type: 'on', pitch, velocity: 64, t: performance.now() }),
     __practice: () => practice,
+    __run: () => run,
+    __cursor: () => cursorMap,
   });
 }
 
 // ---- start ----------------------------------------------------------------
+
+setMode(mode);
+setHands(hands);
+setSpeed(speed);
 
 try {
   entries = await fetchManifest();

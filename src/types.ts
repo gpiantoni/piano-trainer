@@ -12,6 +12,8 @@ export type ExpectedEvent = {
   onMs: number;       // from the timemap, at 1.0x tempo
   offMs: number;      // end of the last tied note
   staff: Staff;
+  beatMs: number;     // one beat (the meter's pulse) at this note, at 1.0x
+  measure: number;    // 0-based bar index in performance order
 };
 
 export type Staff = 1 | 2;   // 1 = right hand (upper staff), 2 = left hand

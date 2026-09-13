@@ -1,6 +1,5 @@
 import type { VerovioToolkit } from 'verovio/esm';
-import type { ExpectedEvent } from '../types.ts';
-import { buildTimeline } from './timeline.ts';
+import { buildTimeline, type ScoreTiming } from './timeline.ts';
 
 export type ScoreEntry = {
   id: string;        // path under scores/ without extension
@@ -46,7 +45,7 @@ export function getToolkit(): Promise<VerovioToolkit> {
   return toolkit;
 }
 
-export async function loadScore(entry: ScoreEntry): Promise<ExpectedEvent[]> {
+export async function loadScore(entry: ScoreEntry): Promise<ScoreTiming> {
   const [tk, xml] = await Promise.all([
     getToolkit(),
     fetch(scoresUrl(encodeURI(entry.path))).then((r) => {

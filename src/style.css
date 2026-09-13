@@ -6,6 +6,7 @@
   --muted: #78716c;
   --accent: #16a34a;
   --muted-note: #c4c0bc;
+  --cursor: #ea580c;
   --wrong: #dc2626;
   --line: color-mix(in srgb, var(--fg) 15%, transparent);
 }
@@ -44,12 +45,20 @@ body {
 .zoom { display: flex; align-items: center; gap: .4rem; }
 .zoom button { width: 2.5rem; font-size: 1.2rem; line-height: 1; }
 .zoom output { min-width: 2.5rem; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; }
-.bar > #restart, .bar > #fullscreen { padding: 0 .9rem; }
-.hands { display: flex; }
-.hands button { padding: 0 .8rem; border-radius: 0; margin-left: -1px; }
-.hands button:first-child { border-radius: .4rem 0 0 .4rem; margin-left: 0; }
-.hands button:last-child { border-radius: 0 .4rem .4rem 0; }
-.hands button[aria-checked="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.bar button { padding: 0 .9rem; }
+.group { display: flex; align-items: center; gap: .5rem; }
+.group[hidden] { display: none; }
+.seg { display: flex; }
+.seg button { padding: 0 .8rem; border-radius: 0; margin-left: -1px; }
+.seg button:first-child { border-radius: .4rem 0 0 .4rem; margin-left: 0; }
+.seg button:last-child { border-radius: 0 .4rem .4rem 0; }
+.seg button[aria-checked="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.bar .zoom button { padding: 0; }
+.speed { min-width: 6.5rem !important; }
+.bar button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); min-width: 5rem; }
+.bar button.primary.running { background: var(--wrong); border-color: var(--wrong); }
+#click { font-size: 1.2rem; }
+.feedback.count { font-size: 1.4rem; font-variant-numeric: tabular-nums; }
 .progress { color: var(--muted); font-size: .9rem; font-variant-numeric: tabular-nums; }
 .feedback { font-weight: 600; }
 .feedback.wrong { color: var(--wrong); }
@@ -62,7 +71,20 @@ body {
 .status { margin: .5rem 1rem 0; color: var(--muted); font-size: .9rem; min-height: 1.6em; }
 
 /* Verovio wraps bars to this width; the page scrolls vertically only. */
-.score { overflow-x: hidden; }
+.score { overflow-x: hidden; position: relative; }
+
+/* Tempo-mode cursor: a soft band just left of the notes being played. Moved
+   with transform only, which stays smooth on the tablet. */
+.cursor {
+  position: absolute;
+  left: -6px;
+  top: 0;
+  width: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--cursor) 55%, transparent);
+  pointer-events: none;
+  will-change: transform;
+}
 .score svg { display: block; width: 100%; height: auto; }
 
 /* Note states. The `*` half matters: a verovio note is a <g> wrapping paths, and
