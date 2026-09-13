@@ -59,7 +59,7 @@ function renderKeys() {
 }
 
 if (!navigator.requestMIDIAccess) {
-  setStatus('This browser has no Web MIDI API. Use Chrome (desktop or Android). Firefox and Safari will not work.', 'bad');
+  setStatus('No Web MIDI API in this browser. Use Chrome. (Safari has no support at all; Firefox for Android has none either, and Firefox desktop only works on localhost unless you install its site-permission add-on.)', 'bad');
 } else {
   try {
     const access = await navigator.requestMIDIAccess({ sysex: false });

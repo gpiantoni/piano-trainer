@@ -19,8 +19,15 @@ npm run dev      # http://localhost:5173
   message with timestamps, shows which keys are down. Keep it; it is the first
   thing to check whenever input misbehaves.
 
-Web MIDI requires a **secure context**: `localhost` or HTTPS. `file://` will not
-work, and neither will Firefox or Safari — Chrome only.
+Web MIDI requires a **secure context**: `localhost` or HTTPS — `file://` will not
+work.
+
+**Use Chrome.** The tablet leaves no choice (Firefox for Android has no Web MIDI,
+Safari has none anywhere), and matching browsers on the laptop means any
+difference you see between the two machines is a real one rather than a browser
+quirk. Firefox desktop does support Web MIDI since 108, but only on `localhost`
+unless you install its per-site permission add-on, so it is usable for local
+development and not for the deployed build.
 
 ## Stack
 
