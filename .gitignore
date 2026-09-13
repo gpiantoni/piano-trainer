@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Sheet music stays local: this repo is public (GitHub Pages on a free account
+# requires it) and most of these scores are still in copyright. Public-domain
+# pieces are whitelisted below; everything else is imported on-device instead.
+public/scores/*
+!public/scores/.gitkeep
+!public/scores/manifest.json
+!public/scores/public-domain/
