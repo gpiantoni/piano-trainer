@@ -5,6 +5,8 @@
   --bg: #fff;
   --muted: #78716c;
   --accent: #16a34a;
+  --current: #2563eb;
+  --wrong: #dc2626;
   --line: color-mix(in srgb, var(--fg) 15%, transparent);
 }
 
@@ -42,10 +44,24 @@ body {
 .zoom { display: flex; align-items: center; gap: .4rem; }
 .zoom button { width: 2.5rem; font-size: 1.2rem; line-height: 1; }
 .zoom output { min-width: 2.5rem; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; }
-.debug { margin-left: auto; color: var(--muted); font-size: .9rem; }
+.bar > #restart { padding: 0 .9rem; }
+.progress { color: var(--muted); font-size: .9rem; font-variant-numeric: tabular-nums; }
+.feedback { font-weight: 600; }
+.feedback.wrong { color: var(--wrong); }
+.feedback.good { color: var(--accent); }
+.end { margin-left: auto; display: flex; align-items: center; gap: .75rem; font-size: .9rem; }
+.midi.ok { color: var(--accent); }
+.midi.bad { color: var(--wrong); }
+.debug { color: var(--muted); }
 
 .status { margin: .5rem 1rem 0; color: var(--muted); font-size: .9rem; min-height: 1.6em; }
 
 /* Verovio wraps bars to this width; the page scrolls vertically only. */
 .score { overflow-x: hidden; }
 .score svg { display: block; width: 100%; height: auto; }
+
+/* Note states. The `*` half matters: a verovio note is a <g> wrapping paths, and
+   the fill must reach them (and override the inherited black). */
+g.note.current, g.note.current * { fill: var(--current); color: var(--current); }
+g.note.hit, g.note.hit * { fill: var(--accent); color: var(--accent); }
+g.note.wrong, g.note.wrong * { fill: var(--wrong); color: var(--wrong); }

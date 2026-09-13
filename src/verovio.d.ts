@@ -16,5 +16,9 @@ declare module 'verovio/esm' {
     redoLayout(options?: Record<string, unknown>): void;
     renderToSVG(pageNo?: number, xmlDeclaration?: boolean): string;
     getLog(): string;
+    getMEI(options?: Record<string, unknown>): string;
+    renderToMIDI(): string;
+    renderToTimemap(options?: Record<string, unknown>): unknown;
+    getMIDIValuesForElement(xmlId: string): unknown;
   }
 }

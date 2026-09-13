@@ -1,4 +1,6 @@
 import type { VerovioToolkit } from 'verovio/esm';
+import type { ExpectedEvent } from '../types.ts';
+import { buildTimeline } from './timeline.ts';
 
 export type ScoreEntry = {
   id: string;        // path under scores/ without extension
@@ -44,7 +46,7 @@ export function getToolkit(): Promise<VerovioToolkit> {
   return toolkit;
 }
 
-export async function loadScore(entry: ScoreEntry): Promise<void> {
+export async function loadScore(entry: ScoreEntry): Promise<ExpectedEvent[]> {
   const [tk, xml] = await Promise.all([
     getToolkit(),
     fetch(scoresUrl(encodeURI(entry.path))).then((r) => {
@@ -53,6 +55,7 @@ export async function loadScore(entry: ScoreEntry): Promise<void> {
     }),
   ]);
   if (!tk.loadData(xml)) throw new Error(`verovio could not load ${entry.path}\n${tk.getLog()}`);
+  return buildTimeline(tk);
 }
 
 // Lay the loaded score out for a container `widthPx` wide. The rendered viewBox

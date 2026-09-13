@@ -24,6 +24,11 @@ npm run dev      # http://localhost:5173
   gitignored except `public-domain/`, and `scores/manifest.json` is generated from
   whatever is there, so the deployed build lists only the public-domain pieces.
 
+  Practice is **wait mode**: the blue notes are the chord to play; it turns green
+  and advances once every note in it is pressed, and a wrong key flashes red and
+  does not advance. No piano at hand? In the dev console, `__play(67)` presses G4
+  and `__practice().expected` lists the pitches it is waiting for.
+
 Web MIDI requires a **secure context**: `localhost` or HTTPS — `file://` will not
 work.
 
@@ -52,8 +57,9 @@ development and not for the deployed build.
 | 3 | Show the score | a piece renders legibly on the tablet |
 | 4 | Timeline + cursor + metronome | cursor on the right note at every downbeat |
 | 5 | Compare: right notes (wait mode) | full piece playable, green/red |
-| 6 | Add the clock: early/late grading | +200ms late reads as late |
+| 6 | Add the clock: early/late grading (Strict / Normal / Relaxed, % of a beat) | Minuet on Normal: +120 ms reads as late |
 | 7 | Duration + sustain pedal | over-held flagged, pedal-aware |
+| 7b | Loudness (velocity), measured only | soft vs loud visible, never graded |
 | 8 | Summary + saved sessions | trend across runs, JSON export |
 | 9 | PWA on the tablet | offline, home-screen icon |
 | 10 | Loops, one-hand, tempo ramp, import | — |
