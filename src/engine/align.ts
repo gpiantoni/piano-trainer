@@ -1,0 +1,161 @@
+import type { ExpectedEvent, Extra, Hands, NoteEvent, PlayedNote } from '../types.ts';
+
+// After a tempo run: pair every recorded key press with the score note it was
+// meant for, then measure timing, duration and velocity. Pure: no DOM, no clock.
+//
+// Pitch is exact, and within one pitch the order of notes is kept, so each pitch
+// is aligned separately with a small edit-distance programme. Looking at the
+// whole run at once means a very late key still pairs with the right note.
+
+export type TimingReference = 'beat' | 'note';
+
+export type AlignOptions = {
+  maxOffsetBeats: number;       // beyond this a key is not that note: missed + extra
+  reference: TimingReference;   // what deltaPct is a percentage of
+  hands: Hands;                 // notes of the other hand are aligned but not reported
+  untilMs: number;              // run stopped here (real ms from t0): later notes are not reported
+};
+
+export const DEFAULT_ALIGN: AlignOptions = { maxOffsetBeats: 1, reference: 'beat', hands: 'both', untilMs: Infinity };
+
+export type Alignment = { notes: PlayedNote[]; extras: Extra[] };
+
+type Press = { pitch: number; on: number; off?: number; velocity: number; pedal: boolean };
+
+// Key presses with their releases. A new press of a key still down (some pianos
+// never send the release in between) ends the previous one.
+export function keyPresses(recording: NoteEvent[]): Press[] {
+  const events = [...recording].sort((a, b) => a.t - b.t);
+  const presses: Press[] = [];
+  const open = new Map<number, Press>();
+  const pedalDowns: [number, number][] = [];   // [down, up] intervals
+  let pedalSince: number | undefined;
+
+  for (const ev of events) {
+    if (ev.type === 'pedal') {
+      if (ev.down && pedalSince === undefined) pedalSince = ev.t;
+      else if (!ev.down && pedalSince !== undefined) { pedalDowns.push([pedalSince, ev.t]); pedalSince = undefined; }
+      continue;
+    }
+    const held = open.get(ev.pitch);
+    if (held) { held.off = ev.t; open.delete(ev.pitch); }
+    if (ev.type === 'on') {
+      const press: Press = { pitch: ev.pitch, on: ev.t, velocity: ev.velocity, pedal: false };
+      presses.push(press);
+      open.set(ev.pitch, press);
+    }
+  }
+  if (pedalSince !== undefined) pedalDowns.push([pedalSince, Infinity]);
+  for (const p of presses) {
+    const end = p.off ?? p.on;
+    p.pedal = pedalDowns.some(([down, up]) => down <= end && up >= p.on);
+  }
+  return presses;
+}
+
+// Minimum-cost monotone pairing of sorted expected times with sorted press
+// times. Returns, for each expected index, the matched press index or -1.
+function alignPitch(expected: { t: number; beat: number }[], presses: number[], maxOffsetBeats: number): number[] {
+  const n = expected.length, m = presses.length;
+  const skip = maxOffsetBeats;   // a match inside the window always beats miss + extra
+  const cost = new Float64Array((n + 1) * (m + 1));
+  const from = new Uint8Array((n + 1) * (m + 1));   // 0 match, 1 skip expected, 2 skip press
+  const at = (i: number, j: number) => i * (m + 1) + j;
+  for (let i = 1; i <= n; i++) { cost[at(i, 0)] = i * skip; from[at(i, 0)] = 1; }
+  for (let j = 1; j <= m; j++) { cost[at(0, j)] = j * skip; from[at(0, j)] = 2; }
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      let best = cost[at(i - 1, j)] + skip, how = 1;
+      if (cost[at(i, j - 1)] + skip < best) { best = cost[at(i, j - 1)] + skip; how = 2; }
+      const e = expected[i - 1];
+      const d = Math.abs(presses[j - 1] - e.t) / e.beat;
+      if (d <= maxOffsetBeats && cost[at(i - 1, j - 1)] + d <= best) { best = cost[at(i - 1, j - 1)] + d; how = 0; }
+      cost[at(i, j)] = best;
+      from[at(i, j)] = how;
+    }
+  }
+  const match = new Array<number>(n).fill(-1);
+  for (let i = n, j = m; i > 0 || j > 0;) {
+    const how = from[at(i, j)];
+    if (how === 0) { match[i - 1] = j - 1; i--; j--; }
+    else if (how === 1) i--;
+    else j--;
+  }
+  return match;
+}
+
+export function align(
+  events: ExpectedEvent[],
+  recording: NoteEvent[],
+  speed: number,
+  options: Partial<AlignOptions> = {},
+): Alignment {
+  const opts = { ...DEFAULT_ALIGN, ...options };
+  const presses = keyPresses(recording);
+  const used = new Set<Press>();
+  const played = new Map<ExpectedEvent, Press>();
+
+  const pitches = new Set([...events.map((e) => e.pitch), ...presses.map((p) => p.pitch)]);
+  for (const pitch of pitches) {
+    const exp = events.filter((e) => e.pitch === pitch).sort((a, b) => a.onMs - b.onMs);
+    const prs = presses.filter((p) => p.pitch === pitch);   // already in time order
+    if (exp.length === 0 || prs.length === 0) continue;
+    const match = alignPitch(
+      exp.map((e) => ({ t: e.onMs / speed, beat: e.beatMs / speed })),
+      prs.map((p) => p.on),
+      opts.maxOffsetBeats,
+    );
+    match.forEach((j, i) => {
+      if (j < 0) return;
+      played.set(exp[i], prs[j]);
+      used.add(prs[j]);
+    });
+  }
+
+  const inHand = (e: ExpectedEvent) => opts.hands === 'both' || e.staff === (opts.hands === 'right' ? 1 : 2);
+  const reached = (e: ExpectedEvent) => e.onMs / speed <= opts.untilMs || played.has(e);
+  const notes: PlayedNote[] = events.filter((e) => inHand(e) && reached(e)).map((expected) => {
+    const press = played.get(expected);
+    if (!press) return { expected, status: 'missed' };
+    const at = expected.onMs / speed;
+    const beat = expected.beatMs / speed;
+    const written = (expected.offMs - expected.onMs) / speed;
+    const reference = opts.reference === 'note' && written > 0 ? written : beat;
+    const deltaMs = press.on - at;
+    const heldMs = press.off === undefined ? undefined : press.off - press.on;
+    return {
+      expected,
+      status: 'played',
+      onsetMs: press.on,
+      deltaMs,
+      deltaPct: (deltaMs / reference) * 100,
+      heldMs,
+      durationPct: heldMs === undefined || written <= 0 ? undefined : (heldMs / written) * 100,
+      velocity: press.velocity,
+      velocityPct: (press.velocity / 127) * 100,
+      pedal: press.pedal,
+    };
+  });
+
+  const extras: Extra[] = presses
+    .filter((p) => !used.has(p))
+    .map((p) => ({ pitch: p.pitch, onsetMs: p.on, velocity: p.velocity }));
+
+  // A missed note with an unmatched key a semitone or two away, in its window:
+  // most likely that key was meant for it.
+  for (const note of notes) {
+    if (note.status !== 'missed') continue;
+    const at = note.expected.onMs / speed, window = (opts.maxOffsetBeats * note.expected.beatMs) / speed;
+    let best: Extra | undefined;
+    for (const x of extras) {
+      if (x.wrongFor || Math.abs(x.pitch - note.expected.pitch) > 2 || Math.abs(x.onsetMs - at) > window) continue;
+      if (!best || Math.abs(x.onsetMs - at) < Math.abs(best.onsetMs - at)) best = x;
+    }
+    if (best) {
+      best.wrongFor = note.expected.id;
+      note.wrongPitch = best.pitch;
+    }
+  }
+
+  return { notes, extras };
+}

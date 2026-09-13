@@ -6,7 +6,8 @@ export type MidiStatus =
   | { kind: 'ready'; inputs: string[] };
 
 // Listens to every connected input (and ones plugged in later). Note-on with
-// velocity 0 is reported as 'off': many keyboards send only that form.
+// velocity 0 is reported as 'off': many keyboards send only that form. The
+// sustain pedal (CC 64) is reported as 'pedal', down at values >= 64.
 export async function listenMidi(
   onNote: (ev: NoteEvent) => void,
   onStatus: (s: MidiStatus) => void,
@@ -26,6 +27,7 @@ export async function listenMidi(
     const cmd = status & 0xf0;
     if (cmd === 0x90 && velocity > 0) onNote({ type: 'on', pitch, velocity, t: e.timeStamp });
     else if (cmd === 0x80 || cmd === 0x90) onNote({ type: 'off', pitch, velocity: 0, t: e.timeStamp });
+    else if (cmd === 0xb0 && pitch === 64) onNote({ type: 'pedal', down: velocity >= 64, t: e.timeStamp });
   };
 
   const attach = () => {

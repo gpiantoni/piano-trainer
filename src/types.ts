@@ -1,9 +1,13 @@
-export type NoteEvent = {
+export type KeyEvent = {
   type: 'on' | 'off';
   pitch: number;      // MIDI note number, 60 = middle C
   velocity: number;
   t: number;          // ms, performance.now() timebase (MIDIMessageEvent.timeStamp)
 };
+
+export type PedalEvent = { type: 'pedal'; down: boolean; t: number };   // sustain, CC 64
+
+export type NoteEvent = KeyEvent | PedalEvent;
 
 export type ExpectedEvent = {
   id: string;         // verovio xml:id == SVG element id of the (first) notehead
@@ -19,3 +23,23 @@ export type ExpectedEvent = {
 export type Staff = 1 | 2;   // 1 = right hand (upper staff), 2 = left hand
 
 export type Hands = 'both' | 'right' | 'left';
+
+// One expected note after a tempo run: what actually happened. Measurements
+// only, nothing here is a grade. Times are real ms at the practice speed,
+// relative to the run's t0.
+export type PlayedNote = {
+  expected: ExpectedEvent;
+  status: 'played' | 'missed';
+  wrongPitch?: number;   // missed, and a nearby unmatched key suggests this was meant
+  onsetMs?: number;      // key down
+  deltaMs?: number;      // onsetMs − expected onset; negative = early
+  deltaPct?: number;     // deltaMs as % of the timing reference (beat or note value)
+  heldMs?: number;       // key down → key up (the finger, not the sound)
+  durationPct?: number;  // heldMs as % of the written duration
+  velocity?: number;     // 1–127
+  velocityPct?: number;  // velocity / 127 × 100
+  pedal?: boolean;       // sustain pedal down at any time while the key was held
+};
+
+// A key press that matched no note in the score.
+export type Extra = { pitch: number; onsetMs: number; velocity: number; wrongFor?: string };

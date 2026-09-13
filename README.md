@@ -13,6 +13,7 @@ Plug the piano into the **laptop** (Chrome on Linux supports Web MIDI, and
 ```bash
 npm install
 npm run dev      # http://localhost:5173
+npm test         # alignment + calibration tests (Node, no browser)
 ```
 
 - `http://localhost:5173/spike.html` — the MIDI debugger. Lists inputs, logs every
@@ -24,12 +25,27 @@ npm run dev      # http://localhost:5173
   gitignored except `public-domain/`, and `scores/manifest.json` is generated from
   whatever is there, so the deployed build lists only the public-domain pieces.
 
-  Practice is **wait mode**: the score waits for the next chord; it turns green
+  **Wait mode**: the score waits for the next chord; it turns green
   and advances once every note in it is pressed, and a wrong key flashes the
-  expected notes red and does not advance. **Both / Right / Left** picks the hand:
-  the other staff greys out and is not asked for. **Full screen** hides the
-  browser bars on the tablet. No piano at hand? In the dev console, `__play(67)` presses G4
-  and `__practice().expected` lists the pitches it is waiting for.
+  expected notes red and does not advance.
+
+  **Tempo mode**: pick a speed, **Start** (or Space), one bar of count-in clicks,
+  then play along with the cursor; 🔔 switches the metronome off after the
+  count-in. Nothing is marked while you play. At the end (or **Stop**) the score
+  shows the run in four colour layers, switched in the strip at the bottom:
+  **Notes** (played / missed / × extra key), **Timing** (blue early, black on
+  time, orange late, as % of a beat or of the note), **Duration** (% of the
+  written length held; blue ring = pedal down) and **Velocity**. Tap a note for
+  its numbers. These are measurements, not grades. **Save run** downloads the
+  raw recording as JSON. **⏱** calibrates latency: tap along with 8 clicks once
+  per device.
+
+  **Both / Right / Left** picks the hand in either mode: the other staff greys
+  out and is not asked for. **Full screen** hides the browser bars on the tablet.
+
+  No piano at hand? In the dev console, `__play(67)` presses G4,
+  `__practice().expected` lists what wait mode is waiting for, and
+  `__replay(recording, speed)` shows a saved run's `recording` in review.
 
 Web MIDI requires a **secure context**: `localhost` or HTTPS — `file://` will not
 work.
@@ -57,11 +73,11 @@ development and not for the deployed build.
 | 1 | MIDI works in the browser ✅ | laptop logs NOTE ON from the piano |
 | 2 | MIDI works on the tablet ✅ | same, over HTTPS, on the real device |
 | 3 | Show the score ✅ | a piece renders legibly on the tablet |
-| 4 | Cursor on wrapped lines + count-in + metronome | cursor on the right note at every downbeat |
+| 4 | Cursor on wrapped lines + count-in + metronome ✅ | cursor on the right note at every downbeat |
 | 5 | Wait mode, one-hand, full screen ✅ | full piece playable, green/red |
-| 6 | Tempo run: play along and record (no live feedback) | onsets line up after latency calibration |
-| 7 | Align recording to score (pure, tested) | late / missed / wrong key / staccato read correctly |
-| 8 | Review in four colour layers: notes, timing, duration, velocity | measurements, not grades |
+| 6 | Tempo run: play along and record (no live feedback) ✅ | onsets line up after latency calibration |
+| 7 | Align recording to score (pure, tested) ✅ | late / missed / wrong key / staccato read correctly |
+| 8 | Review in four colour layers: notes, timing, duration, velocity ✅ | measurements, not grades |
 | 9 | Summary + saved sessions | trend across runs, JSON export |
 | 10 | PWA on the tablet | offline, home-screen icon |
 | 11 | Loops, tempo ramp, import | — |

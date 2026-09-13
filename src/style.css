@@ -7,6 +7,7 @@
   --accent: #16a34a;
   --muted-note: #c4c0bc;
   --cursor: #ea580c;
+  --pedal: #0ea5e9;
   --wrong: #dc2626;
   --line: color-mix(in srgb, var(--fg) 15%, transparent);
 }
@@ -92,3 +93,96 @@ body {
 g.note.muted, g.note.muted * { fill: var(--muted-note); color: var(--muted-note); }
 g.note.hit, g.note.hit * { fill: var(--accent); color: var(--accent); }
 g.note.wrong, g.note.wrong * { fill: var(--wrong); color: var(--wrong); }
+
+/* ---- review after a tempo run ---------------------------------------------- */
+
+/* Colour comes from --note, set per notehead by the chosen layer. */
+g.note.review, g.note.review * { fill: var(--note); color: var(--note); }
+g.note.review.pedal > .notehead use { stroke: var(--pedal); stroke-width: 70px; paint-order: stroke; }
+
+body.reviewing { padding-bottom: 7.5rem; }
+
+.strip {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 2;
+  display: grid;
+  gap: .4rem;
+  padding: .5rem max(1rem, env(safe-area-inset-left)) max(.6rem, env(safe-area-inset-bottom));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  font-size: .9rem;
+}
+.strip[hidden] { display: none; }
+.strip-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; }
+.strip button {
+  font: inherit; color: inherit; background: transparent;
+  border: 1px solid var(--line); border-radius: .4rem; min-height: 2.4rem; padding: 0 .8rem;
+}
+.strip .seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.strip .seg.small button { min-height: 2.1rem; padding: 0 .6rem; }
+.summary { font-variant-numeric: tabular-nums; }
+.strip .save { margin-left: auto; color: var(--muted); }
+.opt { display: flex; align-items: center; gap: .4rem; }
+.opt-label { color: var(--muted); }
+
+.ramp {
+  position: relative;
+  flex: 1 1 16rem;
+  max-width: 28rem;
+  height: .8rem;
+  margin: 0 1.2rem 1.1rem;
+  border-radius: .4rem;
+  background: var(--ramp);
+}
+.ramp span {
+  position: absolute;
+  top: 1rem;
+  transform: translateX(-50%);
+  font-size: .75rem;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.key-legend { color: var(--muted); display: flex; align-items: center; gap: .35rem; }
+.k { display: inline-block; width: .8rem; height: .8rem; border-radius: 50%; margin-left: .4rem; }
+.k.played { background: #16a34a; }
+.k.missed { background: #dc2626; }
+.k.ring { border: 3px solid var(--pedal); }
+.k-x { color: #dc2626; font-size: 1.1rem; margin-left: .4rem; }
+
+.extra {
+  position: absolute;
+  left: -.6rem;
+  top: -1.9rem;
+  width: 1.2rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #dc2626;
+  font: 700 1.3rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.popover {
+  position: absolute;
+  z-index: 1;
+  max-width: calc(100% - 1rem);
+  padding: .4rem .7rem;
+  border-radius: .4rem;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: .9rem;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 4px 16px rgb(0 0 0 / .2);
+  pointer-events: none;
+}
+
+.calib { max-width: min(30rem, calc(100vw - 2rem)); border: 1px solid var(--line); border-radius: .6rem; padding: 1.2rem 1.4rem; }
+.calib::backdrop { background: rgb(0 0 0 / .3); }
+.calib h2 { margin: 0 0 .5rem; font-size: 1.2rem; }
+.calib-status { font-size: 1.2rem; font-weight: 600; min-height: 1.6em; font-variant-numeric: tabular-nums; }
+.calib-buttons { display: flex; gap: .5rem; }
+.calib button { font: inherit; min-height: 2.5rem; padding: 0 1rem; border: 1px solid var(--line); border-radius: .4rem; background: transparent; }
+.calib button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }

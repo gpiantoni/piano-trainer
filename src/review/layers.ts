@@ -1,0 +1,158 @@
+import type { Alignment, TimingReference } from '../engine/align.ts';
+import type { PlayedNote } from '../types.ts';
+import {
+  DURATION_RAMP, NOTES, NOT_MEASURED, TIMING, TIMING_LOG_KNEE, VELOCITY_RAMP,
+} from './palettes.ts';
+
+// PlayedNote -> colour, legend and one-line summary, per review layer.
+// Measurements, not judgements: no layer but "notes" has a good colour.
+
+export type Layer = 'notes' | 'timing' | 'duration' | 'velocity';
+
+export type ReviewSettings = {
+  layer: Layer;
+  maxOffsetBeats: number;
+  reference: TimingReference;
+  timingRange: number;     // ± %
+  timingLog: boolean;
+  durationMax: number;     // %
+  velocityFit: boolean;    // fit the ramp to this run instead of 0–100
+};
+
+export const DEFAULT_SETTINGS: ReviewSettings = {
+  layer: 'notes', maxOffsetBeats: 1, reference: 'beat',
+  timingRange: 25, timingLog: false, durationMax: 150, velocityFit: false,
+};
+
+export type Legend = { gradient: string; ticks: { at: number; label: string }[] };
+
+const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
+const mix = (a: string, b: string, bShare: number) =>
+  bShare <= 0 ? a : bShare >= 1 ? b : `color-mix(in oklab, ${b} ${(bShare * 100).toFixed(1)}%, ${a})`;
+
+function ramp(stops: string[], x: number): string {
+  const pos = clamp01(x) * (stops.length - 1);
+  const i = Math.min(stops.length - 2, Math.floor(pos));
+  return mix(stops[i], stops[i + 1], pos - i);
+}
+
+const quantile = (xs: number[], q: number) => {
+  if (xs.length === 0) return NaN;
+  const s = [...xs].sort((a, b) => a - b);
+  const pos = (s.length - 1) * q, lo = Math.floor(pos);
+  return s[lo] + (s[Math.min(lo + 1, s.length - 1)] - s[lo]) * (pos - lo);
+};
+
+// Timing: signed position in [-1, 1].
+function timingScale(pct: number, s: ReviewSettings): number {
+  const k = TIMING_LOG_KNEE;
+  const v = s.timingLog
+    ? (Math.sign(pct) * Math.log1p(Math.abs(pct) / k)) / Math.log1p(s.timingRange / k)
+    : pct / s.timingRange;
+  return Math.max(-1, Math.min(1, v));
+}
+
+export type Context = { velocityLo: number; velocityHi: number };
+
+export function context(a: Alignment, s: ReviewSettings): Context {
+  const v = a.notes.flatMap((n) => (n.velocityPct === undefined ? [] : [n.velocityPct]));
+  if (!s.velocityFit || v.length < 2) return { velocityLo: 0, velocityHi: 100 };
+  const lo = quantile(v, 0.05), hi = quantile(v, 0.95);
+  return hi - lo < 2 ? { velocityLo: Math.max(0, lo - 5), velocityHi: Math.min(100, hi + 5) } : { velocityLo: lo, velocityHi: hi };
+}
+
+export function colorFor(n: PlayedNote, s: ReviewSettings, c: Context): string {
+  if (s.layer === 'notes') return n.status === 'played' ? NOTES.played : NOTES.missed;
+  if (n.status !== 'played') return NOT_MEASURED;
+  switch (s.layer) {
+    case 'timing': {
+      const v = timingScale(n.deltaPct!, s);
+      return mix(TIMING.onTime, v < 0 ? TIMING.early : TIMING.late, Math.abs(v));
+    }
+    case 'duration':
+      return n.durationPct === undefined ? NOT_MEASURED : ramp(DURATION_RAMP, n.durationPct / s.durationMax);
+    case 'velocity':
+      return ramp(VELOCITY_RAMP, (n.velocityPct! - c.velocityLo) / (c.velocityHi - c.velocityLo));
+  }
+}
+
+const signed = (x: number, digits = 0) => `${x > 0 ? '+' : x < 0 ? '−' : '±'}${Math.abs(x).toFixed(digits)}`;
+
+export function legend(s: ReviewSettings, c: Context): Legend | undefined {
+  switch (s.layer) {
+    case 'notes':
+      return undefined;
+    case 'timing': {
+      const r = s.timingRange;
+      const values = s.timingLog ? [-r, -r / 5, 0, r / 5, r] : [-r, -r / 2, 0, r / 2, r];
+      return {
+        gradient: `linear-gradient(in oklab to right, ${TIMING.early}, ${TIMING.onTime}, ${TIMING.late})`,
+        ticks: values.map((v) => ({ at: (timingScale(v, s) + 1) / 2, label: v === 0 ? 'on time' : `${signed(v, Math.abs(v) < 10 ? 1 : 0)} %` })),
+      };
+    }
+    case 'duration': {
+      const step = s.durationMax > 150 ? 50 : 25;
+      const ticks = [];
+      for (let v = 0; v <= s.durationMax; v += step) ticks.push({ at: v / s.durationMax, label: `${v} %` });
+      return { gradient: `linear-gradient(in oklab to right, ${DURATION_RAMP.join(', ')})`, ticks };
+    }
+    case 'velocity': {
+      const { velocityLo: lo, velocityHi: hi } = c;
+      const ticks = [0, 0.25, 0.5, 0.75, 1].map((at) => ({ at, label: `${Math.round(lo + (hi - lo) * at)} %` }));
+      return { gradient: `linear-gradient(in oklab to right, ${VELOCITY_RAMP.join(', ')})`, ticks };
+    }
+  }
+}
+
+const fmtMedian = (xs: number[], f: (x: number) => string) => (xs.length ? f(quantile(xs, 0.5)) : '—');
+
+function byHand(notes: PlayedNote[], value: (n: PlayedNote) => number | undefined, f: (x: number) => string): string {
+  const all = notes.flatMap((n) => { const v = value(n); return v === undefined ? [] : [v]; });
+  const parts = [`median ${fmtMedian(all, f)}`];
+  const rh = notes.filter((n) => n.expected.staff === 1).flatMap((n) => { const v = value(n); return v === undefined ? [] : [v]; });
+  const lh = notes.filter((n) => n.expected.staff === 2).flatMap((n) => { const v = value(n); return v === undefined ? [] : [v]; });
+  if (rh.length && lh.length) parts.push(`RH ${fmtMedian(rh, f)}`, `LH ${fmtMedian(lh, f)}`);
+  return parts.join(' · ');
+}
+
+export function summary(a: Alignment, s: ReviewSettings): string {
+  const played = a.notes.filter((n) => n.status === 'played');
+  switch (s.layer) {
+    case 'notes': {
+      const missed = a.notes.length - played.length;
+      const wrong = a.notes.filter((n) => n.wrongPitch !== undefined).length;
+      const extras = a.extras.filter((x) => !x.wrongFor).length;
+      return `${played.length} / ${a.notes.length} played · ${missed} missed${wrong ? ` (${wrong} wrong key)` : ''} · ${extras} extra`;
+    }
+    case 'timing': {
+      const pct = played.map((n) => n.deltaPct!);
+      const ms = played.map((n) => n.deltaMs!);
+      if (!pct.length) return 'nothing played';
+      const iqr = quantile(pct, 0.75) - quantile(pct, 0.25);
+      return `median ${signed(quantile(pct, 0.5))} % (${signed(quantile(ms, 0.5))} ms) · spread (IQR) ${iqr.toFixed(0)} %`;
+    }
+    case 'duration':
+      return byHand(played, (n) => n.durationPct, (x) => `${x.toFixed(0)} %`);
+    case 'velocity':
+      return byHand(played, (n) => n.velocityPct, (x) => `${x.toFixed(0)} %`);
+  }
+}
+
+const NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+export const pitchName = (p: number) => `${NAMES[p % 12]}${Math.floor(p / 12) - 1}`;
+
+// Everything about one note at once, for the tap popover.
+export function describe(n: PlayedNote, reference: TimingReference): string {
+  const name = pitchName(n.expected.pitch);
+  if (n.status !== 'played') {
+    return n.wrongPitch !== undefined ? `${name} · missed (played ${pitchName(n.wrongPitch)})` : `${name} · missed`;
+  }
+  const parts = [
+    name,
+    `${signed(n.deltaMs!)} ms (${signed(n.deltaPct!)} % ${reference === 'beat' ? 'of beat' : 'of note'})`,
+    n.heldMs === undefined ? 'still held' : `held ${n.heldMs.toFixed(0)} ms (${n.durationPct?.toFixed(0) ?? '—'} %)`,
+    `vel ${n.velocity} (${n.velocityPct!.toFixed(0)} %)`,
+  ];
+  if (n.pedal) parts.push('pedal');
+  return parts.join(' · ');
+}

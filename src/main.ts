@@ -6,6 +6,9 @@ import { listenMidi } from './midi/input.ts';
 import { WaitMode, forHands, noteName, type Feedback } from './engine/waitMode.ts';
 import { Metronome } from './engine/metronome.ts';
 import { TempoRun } from './engine/tempoRun.ts';
+import { align } from './engine/align.ts';
+import { CALIBRATION, estimateLatency } from './engine/calibration.ts';
+import { ReviewView } from './review/view.ts';
 import type { Hands, NoteEvent } from './types.ts';
 
 const app = document.querySelector<HTMLElement>('#app')!;
@@ -36,6 +39,7 @@ app.innerHTML = `
         <button id="faster" aria-label="Faster">+</button>
       </span>
       <button id="click" role="switch" aria-label="Metronome">🔔</button>
+      <button id="latency" title="Latency calibration">⏱ 0 ms</button>
       <button id="startStop" class="primary">Start</button>
     </span>
     <span id="progress" class="progress"></span>
@@ -48,6 +52,18 @@ app.innerHTML = `
   </header>
   <p id="status" class="status"></p>
   <div id="score" class="score"></div>
+  <div id="strip" class="strip" hidden></div>
+  <dialog id="calib" class="calib">
+    <h2>Latency calibration</h2>
+    <p>Play any key together with each click, as you would play along with the
+    metronome. ${CALIBRATION.lead} clicks to get ready, then ${CALIBRATION.measured} are measured.</p>
+    <p id="calibStatus" class="calib-status"></p>
+    <div class="calib-buttons">
+      <button id="calibGo" class="primary">Start</button>
+      <button id="calibSave" disabled>Save</button>
+      <button id="calibClose">Close</button>
+    </div>
+  </dialog>
 `;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -86,9 +102,23 @@ let timing: ScoreTiming | undefined;
 let practice: WaitMode | undefined;
 let run: TempoRun | undefined;
 let cursorMap: CursorMap | undefined;
+let latencyMs = Number(store.get('latencyMs')) || 0;
+
+// The last finished tempo run, kept for re-analysis and download.
+type LastRun = { recording: NoteEvent[]; speed: number; latencyMs: number; recordedAt: string; untilMs: number };
+let lastRun: LastRun | undefined;
 
 const metronome = new Metronome();
 metronome.enabled = store.get('click') !== 'off';
+
+const review = new ReviewView({
+  score,
+  strip: $('strip'),
+  load: () => { try { return JSON.parse(store.get('review') ?? '{}'); } catch { return {}; } },
+  save: (settings) => store.set('review', JSON.stringify(settings)),
+  realign: () => analyse(),
+  download: downloadRun,
+});
 
 // ---- painting -------------------------------------------------------------
 
@@ -151,6 +181,10 @@ function flashWrong(f: Extract<Feedback, { kind: 'wrong' }>) {
 // ---- wait mode --------------------------------------------------------------
 
 function onNote(ev: NoteEvent) {
+  if (calibrating) {
+    if (ev.type === 'on') calibTaps.push(ev.t);
+    return;
+  }
   if (mode === 'tempo') {
     run?.record(ev);
     return;
@@ -168,6 +202,8 @@ function onNote(ev: NoteEvent) {
 
 function restart() {
   stopRun();
+  review.clear();
+  lastRun = undefined;
   if (timing) practice = new WaitMode(timing.events, hands);
   clearFeedback();
   paint();
@@ -201,8 +237,10 @@ let frame = 0;
 async function startRun() {
   if (!timing || run) return;
   clearFeedback();
+  review.clear();
+  lastRun = undefined;
   await metronome.prepare();          // inside the tap: audio may start
-  run = new TempoRun(timing, speed);
+  run = new TempoRun(timing, speed, latencyMs);
   metronome.play(run.clicks);
   followedSystem = null;
   wakeLock = await navigator.wakeLock?.request('screen').catch(() => undefined);
@@ -243,9 +281,37 @@ function stopRun() {
 }
 
 function finishRun() {
+  const finished = run;
+  const reachedMusic = finished && finished.scoreTime() > 0;
+  const untilMs = finished ? performance.now() - finished.t0 : 0;
   stopRun();
-  feedback.textContent = 'Finished';
-  feedback.className = 'feedback good';
+  if (!finished || !reachedMusic) return;
+  lastRun = {
+    recording: finished.recording, speed: finished.speed, untilMs,
+    latencyMs: finished.latencyMs, recordedAt: new Date().toISOString(),
+  };
+  analyse();
+  startStop.textContent = 'Play again';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// Align the last run to the score with the current review settings.
+function analyse() {
+  if (!lastRun || !timing) return;
+  const { maxOffsetBeats, reference } = review.settings;
+  const { recording, speed: runSpeed, untilMs } = lastRun;
+  review.show(align(timing.events, recording, runSpeed, { maxOffsetBeats, reference, hands, untilMs }), runSpeed);
+}
+
+function downloadRun() {
+  if (!lastRun || !loaded || !timing) return;
+  const data = { score: loaded.id, title: loaded.title, bpm: timing.bpm, hands, ...lastRun };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }));
+  const a = Object.assign(document.createElement('a'), {
+    href: url, download: `${loaded.title} ${lastRun.recordedAt.slice(0, 16).replace(':', '')}.json`,
+  });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 startStop.onclick = () => (run ? finishRun() : startRun());
@@ -253,7 +319,7 @@ startStop.onclick = () => (run ? finishRun() : startRun());
 function setSpeed(next: number) {
   speed = Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, next)) * 100) / 100;
   store.set('speed', String(speed));
-  const bpm = timing ? ` · ♩ ${Math.round(timing.bpm * speed)}` : '';
+  const bpm = timing ? ` · ${Math.round(timing.bpm * speed)} bpm` : '';
   $('speed').textContent = `${Math.round(speed * 100)} %${bpm}`;
 }
 $('slower').onclick = () => setSpeed(speed - SPEED_STEP);
@@ -270,11 +336,68 @@ function setClick(on: boolean) {
 clickButton.onclick = () => setClick(!metronome.enabled);
 setClick(metronome.enabled);
 
+// ---- latency calibration ----------------------------------------------------
+
+const calib = $<HTMLDialogElement>('calib');
+const calibStatus = $('calibStatus');
+const latencyButton = $<HTMLButtonElement>('latency');
+let calibrating = false;
+let calibTaps: number[] = [];
+let calibResult: number | undefined;
+
+function showLatency() {
+  latencyButton.textContent = `⏱ ${latencyMs} ms`;
+}
+showLatency();
+
+latencyButton.onclick = () => {
+  stopRun();
+  calibStatus.textContent = `Current: ${latencyMs} ms`;
+  $<HTMLButtonElement>('calibSave').disabled = true;
+  calib.showModal();
+};
+
+$('calibGo').onclick = async () => {
+  await metronome.prepare();
+  const beat = 60000 / CALIBRATION.bpm;
+  const start = performance.now() + 500;
+  const total = CALIBRATION.lead + CALIBRATION.measured;
+  const times = Array.from({ length: total }, (_, i) => start + i * beat);
+  metronome.play(times.map((at, i) => ({ at, accent: i % 4 === 0, always: true })));
+  calibTaps = [];
+  calibResult = undefined;
+  calibrating = true;
+  $<HTMLButtonElement>('calibSave').disabled = true;
+  calibStatus.textContent = 'Listen… then play along';
+  setTimeout(() => {
+    calibrating = false;
+    const est = estimateLatency(times.slice(CALIBRATION.lead), calibTaps);
+    if (!est) {
+      calibStatus.textContent = 'Not enough key presses near the clicks. Try again.';
+      return;
+    }
+    calibResult = est.latencyMs;
+    calibStatus.textContent = `${est.latencyMs} ms (${est.taps} taps, spread ±${est.spreadMs} ms)`;
+    $<HTMLButtonElement>('calibSave').disabled = false;
+  }, times[total - 1] - performance.now() + beat);
+};
+
+$('calibSave').onclick = () => {
+  if (calibResult === undefined) return;
+  latencyMs = calibResult;
+  store.set('latencyMs', String(latencyMs));
+  showLatency();
+  calib.close();
+};
+$('calibClose').onclick = () => { calibrating = false; metronome.stop(); calib.close(); };
+
 // ---- mode and hands ---------------------------------------------------------
 
 const modeButtons = [...document.querySelectorAll<HTMLButtonElement>('#modes button')];
 function setMode(next: Mode) {
   stopRun();
+  review.clear();
+  lastRun = undefined;
   mode = next;
   store.set('mode', mode);
   for (const b of modeButtons) b.setAttribute('aria-checked', String(b.dataset.mode === mode));
@@ -290,13 +413,15 @@ function setHands(next: Hands) {
   hands = next;
   store.set('hands', hands);
   for (const b of handButtons) b.setAttribute('aria-checked', String(b.dataset.hands === hands));
-  restart();
+  // Reviewing a run: just show the other hand's view of the same recording.
+  if (mode === 'tempo' && lastRun && !run) { paint(); analyse(); }
+  else restart();
 }
 for (const b of handButtons) b.onclick = () => setHands(b.dataset.hands as Hands);
 
 // Space starts/stops a tempo run from a computer keyboard.
 document.addEventListener('keydown', (e) => {
-  if (e.code !== 'Space' || mode !== 'tempo' || (e.target as HTMLElement).matches('select, input')) return;
+  if (e.code !== 'Space' || mode !== 'tempo' || calib.open || (e.target as HTMLElement).matches('select, input')) return;
   e.preventDefault();
   startStop.click();
 });
@@ -327,6 +452,7 @@ async function layout(mine?: number) {
   laidOutWidth = width;
   noteEls = new Map([...score.querySelectorAll('g.note')].map((el) => [el.id, el]));
   cursorMap = new CursorMap(score, timing);
+  review.attach(noteEls, cursorMap);
   followedSystem = null;
   paint();
 }
@@ -334,6 +460,8 @@ async function layout(mine?: number) {
 async function show(entry: ScoreEntry) {
   const mine = ++seq;
   stopRun();
+  review.clear();
+  lastRun = undefined;
   status.textContent = `Loading ${entry.title}…`;
   try {
     const t = await loadScore(entry);
@@ -406,6 +534,14 @@ if (import.meta.env.DEV) {
     __practice: () => practice,
     __run: () => run,
     __cursor: () => cursorMap,
+    __review: () => review,
+    // Feed a recording as if a run just finished, e.g. from a saved run file.
+    __replay: (recording: NoteEvent[], runSpeed = speed) => {
+      if (mode !== 'tempo') setMode('tempo');
+      lastRun = { recording, speed: runSpeed, latencyMs: 0, recordedAt: new Date().toISOString(), untilMs: Infinity };
+      analyse();
+    },
+    __timing: () => timing,
   });
 }
 
