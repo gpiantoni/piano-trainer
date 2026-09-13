@@ -71,6 +71,12 @@ body {
 
 .status { margin: .5rem 1rem 0; color: var(--muted); font-size: .9rem; min-height: 1.6em; }
 
+/* Wait mode's wrong-note message. Its own line below the title, not the sticky
+   header bar, so a long message never forces the toolbar to wrap and shift. */
+.wait-feedback { margin: 0 1rem .5rem; font-weight: 600; min-height: 1.6em; }
+.wait-feedback.wrong { color: var(--wrong); }
+.wait-feedback.good { color: var(--accent); }
+
 /* Verovio wraps bars to this width; the page scrolls vertically only. */
 .score { overflow-x: hidden; position: relative; }
 

@@ -51,6 +51,7 @@ app.innerHTML = `
     </span>
   </header>
   <p id="status" class="status"></p>
+  <p id="waitFeedback" class="wait-feedback" aria-live="polite" hidden></p>
   <div id="score" class="score"></div>
   <div id="strip" class="strip" hidden></div>
   <dialog id="calib" class="calib">
@@ -71,6 +72,7 @@ const picker = $<HTMLSelectElement>('picker');
 const status = $('status');
 const score = $('score');
 const feedback = $('feedback');
+const waitFeedback = $('waitFeedback');
 const startStop = $<HTMLButtonElement>('startStop');
 
 // localStorage can throw (private mode, blocked storage); the app works without it.
@@ -163,18 +165,25 @@ function clearFeedback() {
   feedback.className = 'feedback';
 }
 
+// Wait mode's own feedback line, below the title — not the sticky header bar,
+// so a long "wrong note" message never forces the toolbar to wrap and shift.
+function clearWaitFeedback() {
+  waitFeedback.textContent = '';
+  waitFeedback.className = 'wait-feedback';
+}
+
 let flashTimer: number | undefined;
 function flashWrong(f: Extract<Feedback, { kind: 'wrong' }>) {
   const want = f.expected.map(noteName).join(' ');
-  feedback.textContent = `${noteName(f.pitch)} — expected ${want}`;
-  feedback.className = 'feedback wrong';
+  waitFeedback.textContent = `${noteName(f.pitch)} — expected ${want}`;
+  waitFeedback.className = 'wait-feedback wrong';
   const ids = new Set(practice?.current?.events
     .filter((e) => f.expected.includes(e.pitch)).flatMap((e) => [e.id, ...e.tiedIds]));
   for (const id of ids) noteEls.get(id)?.classList.add('wrong');
   clearTimeout(flashTimer);
   flashTimer = window.setTimeout(() => {
     for (const el of score.querySelectorAll('g.note.wrong')) el.classList.remove('wrong');
-    if (feedback.classList.contains('wrong')) clearFeedback();   // unless replaced since
+    if (waitFeedback.classList.contains('wrong')) clearWaitFeedback();   // unless replaced since
   }, 600);
 }
 
@@ -194,7 +203,7 @@ function onNote(ev: NoteEvent) {
   if (out.length === 0) return;
   for (const f of out) {
     if (f.kind === 'wrong') flashWrong(f);
-    else if (f.kind === 'done') { feedback.textContent = 'Well played!'; feedback.className = 'feedback good'; }
+    else if (f.kind === 'done') { waitFeedback.textContent = 'Well played!'; waitFeedback.className = 'wait-feedback good'; }
   }
   paint();
   follow();
@@ -205,7 +214,7 @@ function restart() {
   review.clear();
   lastRun = undefined;
   if (timing) practice = new WaitMode(timing.events, hands);
-  clearFeedback();
+  clearWaitFeedback();
   paint();
   window.scrollTo({ top: 0, behavior: 'smooth' });
   followedSystem = null;
@@ -403,6 +412,7 @@ function setMode(next: Mode) {
   for (const b of modeButtons) b.setAttribute('aria-checked', String(b.dataset.mode === mode));
   $('waitControls').hidden = mode !== 'wait';
   $('tempoControls').hidden = mode !== 'tempo';
+  waitFeedback.hidden = mode !== 'wait';
   restart();
 }
 for (const b of modeButtons) b.onclick = () => setMode(b.dataset.mode as Mode);
@@ -471,6 +481,7 @@ async function show(entry: ScoreEntry) {
     practice = new WaitMode(timing.events, hands);
     setSpeed(speed);
     clearFeedback();
+    clearWaitFeedback();
     await layout(mine);
     // A resize may have re-flowed meanwhile; that still shows this score.
     if (loaded !== entry) return;
