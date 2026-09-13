@@ -1,0 +1,125 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIDI spike — piano-trainer</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 ui-monospace, monospace; padding: 1rem; max-width: 60rem; margin: 0 auto; }
+  h1 { font-size: 1.1rem; }
+  h2 { font-size: .95rem; margin: 1.2rem 0 .4rem; opacity: .7; text-transform: uppercase; letter-spacing: .05em; }
+  #status { padding: .6rem .8rem; border-radius: .4rem; border: 1px solid currentColor; }
+  #status.ok   { color: #16a34a; }
+  #status.bad  { color: #dc2626; }
+  #status.warn { color: #d97706; }
+  ul { margin: 0; padding-left: 1.2rem; }
+  #keys { font-size: 1.6rem; min-height: 2rem; letter-spacing: .1em; }
+  #log { white-space: pre; overflow-x: auto; background: color-mix(in srgb, currentColor 6%, transparent);
+         padding: .6rem; border-radius: .4rem; max-height: 60vh; overflow-y: auto; font-size: 12px; }
+  label { user-select: none; margin-right: 1rem; }
+  .hint { opacity: .6; font-size: 12px; }
+</style>
+
+<h1>MIDI spike</h1>
+<div id="status" class="warn">requesting MIDI access…</div>
+
+<h2>Inputs</h2>
+<ul id="devs"><li class="hint">none yet</li></ul>
+
+<h2>Keys currently down</h2>
+<div id="keys"></div>
+
+<h2>Messages</h2>
+<p>
+  <label><input type="checkbox" id="filterRealtime" checked> hide clock / active-sensing</label>
+  <label><input type="checkbox" id="paused"> pause</label>
+  <button id="clear">clear</button>
+</p>
+<div id="log"></div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const noteName = (n) => `${NOTE_NAMES[n % 12]}${Math.floor(n / 12) - 1}`;
+
+const lines = [];
+const down = new Map();           // pitch -> { t, velocity }
+let lastTs = null;
+
+function setStatus(text, cls) { $('status').textContent = text; $('status').className = cls; }
+
+function log(parts) {
+  if ($('paused').checked) return;
+  lines.unshift(parts);
+  if (lines.length > 500) lines.length = 500;
+  $('log').textContent = lines.join('\n');
+}
+
+function renderKeys() {
+  $('keys').textContent = [...down.keys()].sort((a, b) => a - b).map(noteName).join(' ') || '—';
+}
+
+if (!navigator.requestMIDIAccess) {
+  setStatus('This browser has no Web MIDI API. Use Chrome (desktop or Android). Firefox and Safari will not work.', 'bad');
+} else {
+  try {
+    const access = await navigator.requestMIDIAccess({ sysex: false });
+    access.onstatechange = (e) => {
+      log(`${'—'.repeat(10)} ${e.port.type} "${e.port.name}" is now ${e.port.state}/${e.port.connection}`);
+      listDevices(access);
+    };
+    listDevices(access);
+  } catch (err) {
+    setStatus(`MIDI access denied or failed: ${err}. Check chrome://settings/content/midiDevices`, 'bad');
+  }
+}
+
+function listDevices(access) {
+  const inputs = [...access.inputs.values()];
+  $('devs').innerHTML = inputs.length
+    ? inputs.map(i => `<li><strong>${i.name}</strong> — ${i.manufacturer || 'unknown maker'} <span class="hint">[${i.state}/${i.connection}]</span></li>`).join('')
+    : '<li class="hint">no MIDI inputs found — check the cable, then replug the piano</li>';
+
+  for (const input of inputs) input.onmidimessage = onMessage;
+
+  if (inputs.length) setStatus(`${inputs.length} MIDI input(s) found. Play a key.`, 'ok');
+  else setStatus('MIDI access granted, but no input devices. Try another USB cable (many are charge-only).', 'warn');
+}
+
+function onMessage(e) {
+  const [status, d1 = 0, d2 = 0] = e.data;
+  const cmd = status & 0xf0;
+  const chan = (status & 0x0f) + 1;
+
+  // Pianos emit Active Sensing (0xFE) ~every 300ms and Timing Clock (0xF8) constantly.
+  const isRealtime = status >= 0xf8;
+  if (isRealtime && $('filterRealtime').checked) return;
+
+  // NOTE: note-on with velocity 0 is a note-off. Many keyboards send only this form.
+  const isNoteOn  = cmd === 0x90 && d2 > 0;
+  const isNoteOff = cmd === 0x80 || (cmd === 0x90 && d2 === 0);
+
+  if (isNoteOn) { down.set(d1, { t: e.timeStamp, velocity: d2 }); renderKeys(); }
+  if (isNoteOff) { down.delete(d1); renderKeys(); }
+
+  let kind, detail = '';
+  if (isNoteOn)        { kind = 'NOTE ON '; detail = `${noteName(d1)} (${d1})  vel=${d2}`; }
+  else if (isNoteOff)  { kind = 'NOTE OFF'; detail = `${noteName(d1)} (${d1})`; }
+  else if (cmd === 0xb0) {
+    kind = 'CC      ';
+    detail = `${d1}=${d2}` + (d1 === 64 ? `  <-- SUSTAIN PEDAL ${d2 >= 64 ? 'DOWN' : 'UP'}` : '');
+  }
+  else if (cmd === 0xe0) { kind = 'PITCHBEND'; detail = String((d2 << 7) | d1); }
+  else if (status === 0xfe) { kind = 'ACTIVE  '; }
+  else if (status === 0xf8) { kind = 'CLOCK   '; }
+  else { kind = `0x${status.toString(16)}`; detail = `${d1} ${d2}`; }
+
+  // Delta between messages: a sanity check that timestamps are sane and monotonic.
+  const delta = lastTs === null ? 0 : e.timeStamp - lastTs;
+  lastTs = e.timeStamp;
+
+  log(`${e.timeStamp.toFixed(1).padStart(11)}  +${delta.toFixed(1).padStart(7)}  ch${String(chan).padStart(2)}  ${kind}  ${detail}`);
+}
+
+$('clear').onclick = () => { lines.length = 0; $('log').textContent = ''; lastTs = null; };
+renderKeys();
+</script>
