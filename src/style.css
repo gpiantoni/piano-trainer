@@ -1,35 +1,51 @@
+/* Light only: black notation on white paper reads best at the piano. */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --fg: #1c1917;
-  --bg: #fafaf9;
+  --bg: #fff;
   --muted: #78716c;
   --accent: #16a34a;
   --line: color-mix(in srgb, var(--fg) 15%, transparent);
 }
-@media (prefers-color-scheme: dark) {
-  :root { --fg: #f5f5f4; --bg: #1c1917; --muted: #a8a29e; }
-}
 
 * { box-sizing: border-box; }
+/* Reserve the scrollbar so its appearance does not change the width and re-flow. */
+html { scrollbar-gutter: stable; }
 body {
   margin: 0;
   font: 16px/1.6 system-ui, sans-serif;
   color: var(--fg);
   background: var(--bg);
 }
-main { max-width: 44rem; margin: 0 auto; padding: 3rem 1.5rem; }
-h1 { font-size: 1.5rem; margin: 0 0 .25rem; }
-.sub { color: var(--muted); margin: 0 0 2.5rem; }
-.card {
-  display: block;
-  padding: 1rem 1.2rem;
-  border: 1px solid var(--line);
-  border-radius: .6rem;
-  text-decoration: none;
-  color: inherit;
-  margin-bottom: .75rem;
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .75rem;
+  padding: .75rem max(1rem, env(safe-area-inset-left));
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
 }
-.card:hover { border-color: var(--accent); }
-.card strong { display: block; }
-.card span { color: var(--muted); font-size: .9rem; }
-.card[aria-disabled='true'] { opacity: .45; pointer-events: none; }
+.bar select, .bar button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: .4rem;
+  min-height: 2.5rem;         /* finger-sized on the tablet */
+}
+.bar select { padding: 0 .6rem; max-width: 100%; }
+.zoom { display: flex; align-items: center; gap: .4rem; }
+.zoom button { width: 2.5rem; font-size: 1.2rem; line-height: 1; }
+.zoom output { min-width: 2.5rem; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; }
+.debug { margin-left: auto; color: var(--muted); font-size: .9rem; }
+
+.status { margin: .5rem 1rem 0; color: var(--muted); font-size: .9rem; min-height: 1.6em; }
+
+/* Verovio wraps bars to this width; the page scrolls vertically only. */
+.score { overflow-x: hidden; }
+.score svg { display: block; width: 100%; height: auto; }

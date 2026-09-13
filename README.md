@@ -19,6 +19,11 @@ npm run dev      # http://localhost:5173
   message with timestamps, shows which keys are down. Keep it; it is the first
   thing to check whenever input misbehaves.
 
+- `http://localhost:5173/` — the score view. It lists every `*.musicxml` under
+  `public/scores/` (copy them from `MuseScore4/Scores/export/`). The files are
+  gitignored except `public-domain/`, and `scores/manifest.json` is generated from
+  whatever is there, so the deployed build lists only the public-domain pieces.
+
 Web MIDI requires a **secure context**: `localhost` or HTTPS — `file://` will not
 work.
 
