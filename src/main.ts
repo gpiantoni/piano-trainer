@@ -2,7 +2,7 @@ import './style.css';
 import { fetchManifest, layoutScore, loadScore, type ScoreEntry } from './score/load.ts';
 import { listenMidi } from './midi/input.ts';
 import { WaitMode, noteName, type Feedback } from './engine/waitMode.ts';
-import type { NoteEvent } from './types.ts';
+import type { ExpectedEvent, Hands, NoteEvent } from './types.ts';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
@@ -13,7 +13,13 @@ app.innerHTML = `
       <output id="zoomLevel"></output>
       <button id="zoomIn" aria-label="Larger">+</button>
     </div>
+    <div class="hands" role="radiogroup" aria-label="Hands">
+      <button data-hands="both" role="radio">Both</button>
+      <button data-hands="right" role="radio">Right</button>
+      <button data-hands="left" role="radio">Left</button>
+    </div>
     <button id="restart">Restart</button>
+    <button id="fullscreen" hidden>Full screen</button>
     <span id="progress" class="progress"></span>
     <span id="feedback" class="feedback" aria-live="polite"></span>
     <span class="end">
@@ -47,6 +53,8 @@ let loaded: ScoreEntry | undefined;
 let seq = 0;                        // drops a slow render superseded by a newer one
 let laidOutWidth = 0;
 let practice: WaitMode | undefined;
+let timeline: ExpectedEvent[] = [];
+let hands: Hands = (['both', 'right', 'left'] as const).find((h) => h === store.get('hands')) ?? 'both';
 
 // ---- painting -------------------------------------------------------------
 
@@ -58,7 +66,7 @@ function paint() {
   for (const [id, el] of noteEls) {
     const s = states.get(id);
     el.classList.toggle('hit', s === 'hit');
-    el.classList.toggle('current', s === 'current');
+    el.classList.toggle('muted', s === 'muted');
   }
   $('progress').textContent = !practice ? ''
     : practice.done ? `Done · ${practice.wrong} wrong`
@@ -109,14 +117,41 @@ function onNote(ev: NoteEvent) {
   follow();
 }
 
-$('restart').onclick = () => {
+function restart() {
   if (!practice) return;
   practice.restart();
   clearFeedback();
   paint();
   window.scrollTo({ top: 0, behavior: 'smooth' });
   followedSystem = null;
-};
+}
+$('restart').onclick = restart;
+
+// One hand only: the other staff greys out and is not asked for. Starts over.
+const handButtons = [...document.querySelectorAll<HTMLButtonElement>('.hands button')];
+function setHands(next: Hands) {
+  hands = next;
+  store.set('hands', hands);
+  for (const b of handButtons) b.setAttribute('aria-checked', String(b.dataset.hands === hands));
+  if (!loaded) return;
+  practice = new WaitMode(timeline, hands);
+  restart();
+}
+for (const b of handButtons) b.onclick = () => setHands(b.dataset.hands as Hands);
+setHands(hands);
+
+// Full screen hides the browser's address bar on the tablet. Not every browser
+// can do it for a page (iPhone Safari), so the button only appears where it works.
+const fullscreen = $<HTMLButtonElement>('fullscreen');
+if (document.fullscreenEnabled) {
+  fullscreen.hidden = false;
+  fullscreen.onclick = () => document.fullscreenElement
+    ? document.exitFullscreen()
+    : document.documentElement.requestFullscreen();
+  document.addEventListener('fullscreenchange', () => {
+    fullscreen.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
+  });
+}
 
 // ---- layout ---------------------------------------------------------------
 
@@ -137,10 +172,11 @@ async function show(entry: ScoreEntry) {
   const mine = ++seq;
   status.textContent = `Loading ${entry.title}…`;
   try {
-    const timeline = await loadScore(entry);
+    const events = await loadScore(entry);
     if (mine !== seq) return;
     loaded = entry;
-    practice = new WaitMode(timeline);
+    timeline = events;
+    practice = new WaitMode(timeline, hands);
     clearFeedback();
     await layout(mine);
     // A resize may have re-flowed meanwhile; that still shows this score.

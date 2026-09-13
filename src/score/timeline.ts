@@ -1,5 +1,5 @@
 import type { VerovioToolkit } from 'verovio/esm';
-import type { ExpectedEvent } from '../types.ts';
+import type { ExpectedEvent, Staff } from '../types.ts';
 
 type TimemapEntry = {
   tstamp: number;     // ms at the score's own tempo
@@ -27,6 +27,28 @@ function tieLinks(mei: string): Map<string, string> {
   return links;
 }
 
+// note id -> staff (hand). Notes sit inside <staff n>; a cross-staff note or
+// chord carries its own staff="…", which wins. The SVG has no staff numbers.
+function staffLinks(mei: string): Map<string, Staff> {
+  const links = new Map<string, Staff>();
+  let staff = 1;
+  let chordStaff: number | undefined;
+  for (const [tag, name] of mei.matchAll(/<\/?(staff|chord|note)\b[^>]*>/g)) {
+    const own = Number(tag.match(/\sstaff="(\d+)"/)?.[1]) || undefined;
+    if (tag.startsWith('</')) {
+      if (name === 'chord') chordStaff = undefined;
+    } else if (name === 'staff') {
+      staff = Number(tag.match(/\sn="(\d+)"/)?.[1]) || 1;
+    } else if (name === 'chord') {
+      if (!tag.endsWith('/>')) chordStaff = own;
+    } else {
+      const id = tag.match(/xml:id="([^"]+)"/)?.[1];
+      if (id) links.set(id, (own ?? chordStaff ?? staff) >= 2 ? 2 : 1);
+    }
+  }
+  return links;
+}
+
 // Requires a score already loaded into `tk`. Note ids are regenerated on every
 // load, so rebuild the timeline whenever the score is (re)loaded.
 export function buildTimeline(tk: VerovioToolkit): ExpectedEvent[] {
@@ -35,7 +57,9 @@ export function buildTimeline(tk: VerovioToolkit): ExpectedEvent[] {
   const map: unknown = typeof raw === 'string' ? JSON.parse(raw) : raw;
   assertTimemap(map);
 
-  const tieStartOf = tieLinks(tk.getMEI());
+  const mei = tk.getMEI();
+  const tieStartOf = tieLinks(mei);
+  const staffOf = staffLinks(mei);
   const root = (id: string) => {
     let cur = id;
     for (let s = tieStartOf.get(cur); s; s = tieStartOf.get(cur)) cur = s;   // chains a→b→c
@@ -55,7 +79,7 @@ export function buildTimeline(tk: VerovioToolkit): ExpectedEvent[] {
     const midi = tk.getMIDIValuesForElement(id) as { pitch?: number } | string;
     const pitch = (typeof midi === 'string' ? JSON.parse(midi) : midi).pitch;
     if (typeof pitch !== 'number') continue;
-    events.set(id, { id, tiedIds: [], pitch, onMs, offMs: offAt.get(id) ?? onMs });
+    events.set(id, { id, tiedIds: [], pitch, onMs, offMs: offAt.get(id) ?? onMs, staff: staffOf.get(id) ?? 1 });
   }
   for (const id of onAt.keys()) {
     const ev = events.get(root(id));

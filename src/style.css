@@ -5,7 +5,7 @@
   --bg: #fff;
   --muted: #78716c;
   --accent: #16a34a;
-  --current: #2563eb;
+  --muted-note: #c4c0bc;
   --wrong: #dc2626;
   --line: color-mix(in srgb, var(--fg) 15%, transparent);
 }
@@ -44,7 +44,12 @@ body {
 .zoom { display: flex; align-items: center; gap: .4rem; }
 .zoom button { width: 2.5rem; font-size: 1.2rem; line-height: 1; }
 .zoom output { min-width: 2.5rem; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; }
-.bar > #restart { padding: 0 .9rem; }
+.bar > #restart, .bar > #fullscreen { padding: 0 .9rem; }
+.hands { display: flex; }
+.hands button { padding: 0 .8rem; border-radius: 0; margin-left: -1px; }
+.hands button:first-child { border-radius: .4rem 0 0 .4rem; margin-left: 0; }
+.hands button:last-child { border-radius: 0 .4rem .4rem 0; }
+.hands button[aria-checked="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 .progress { color: var(--muted); font-size: .9rem; font-variant-numeric: tabular-nums; }
 .feedback { font-weight: 600; }
 .feedback.wrong { color: var(--wrong); }
@@ -62,6 +67,6 @@ body {
 
 /* Note states. The `*` half matters: a verovio note is a <g> wrapping paths, and
    the fill must reach them (and override the inherited black). */
-g.note.current, g.note.current * { fill: var(--current); color: var(--current); }
+g.note.muted, g.note.muted * { fill: var(--muted-note); color: var(--muted-note); }
 g.note.hit, g.note.hit * { fill: var(--accent); color: var(--accent); }
 g.note.wrong, g.note.wrong * { fill: var(--wrong); color: var(--wrong); }

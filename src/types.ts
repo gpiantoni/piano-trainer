@@ -11,4 +11,9 @@ export type ExpectedEvent = {
   pitch: number;
   onMs: number;       // from the timemap, at 1.0x tempo
   offMs: number;      // end of the last tied note
+  staff: Staff;
 };
+
+export type Staff = 1 | 2;   // 1 = right hand (upper staff), 2 = left hand
+
+export type Hands = 'both' | 'right' | 'left';
