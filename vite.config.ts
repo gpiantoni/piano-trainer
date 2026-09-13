@@ -2,16 +2,16 @@ import { defineConfig, type Plugin } from 'vite';
 import { fileURLToPath } from 'node:url';
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { baseName, musicXmlMeta } from './src/score/meta.ts';
 
 const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 // scores/manifest.json is generated from whatever *.musicxml files are in
 // public/scores/, never committed. Locally that is the whole library; in CI only
 // public-domain/ exists, so the deployed manifest never lists a file that 404s.
+// Scores of your own reach the tablet through the in-app Library instead.
 function scoresManifest(): Plugin {
   const dir = here('./public/scores');
-
-  const tag = (xml: string, re: RegExp) => xml.match(re)?.[1].trim() ?? '';
 
   function build() {
     if (!existsSync(dir)) return [];
@@ -19,14 +19,9 @@ function scoresManifest(): Plugin {
       .filter((f) => f.endsWith('.musicxml'))
       .sort();
     return files.map((f) => {
-      const xml = readFileSync(join(dir, f), 'utf8').slice(0, 4000);
+      const { title, composer } = musicXmlMeta(readFileSync(join(dir, f), 'utf8'));
       const path = relative(dir, join(dir, f)).split('\\').join('/');
-      return {
-        id: path.replace(/\.musicxml$/, ''),
-        title: tag(xml, /<work-title>([^<]*)</) || tag(xml, /<movement-title>([^<]*)</) || path,
-        composer: tag(xml, /<creator type="composer">([^<]*)</),
-        path,
-      };
+      return { id: path.replace(/\.musicxml$/, ''), title: title || baseName(path), composer, path };
     });
   }
 

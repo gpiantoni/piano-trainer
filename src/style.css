@@ -192,3 +192,17 @@ body.reviewing { padding-bottom: 7.5rem; }
 .calib-buttons { display: flex; gap: .5rem; }
 .calib button { font: inherit; min-height: 2.5rem; padding: 0 1rem; border: 1px solid var(--line); border-radius: .4rem; background: transparent; }
 .calib button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+
+/* ---- library dialog ---------------------------------------------------------- */
+
+.status.hint { margin-top: 0; }
+.library { width: min(40rem, calc(100vw - 2rem)); }
+.library h3 { margin: 1rem 0 .3rem; font-size: .95rem; color: var(--muted); font-weight: 600; }
+.library.busy button { opacity: .5; pointer-events: none; }
+.lib-status { min-height: 1.5em; margin: .6rem 0 .2rem; font-variant-numeric: tabular-nums; }
+.lib-note { color: var(--muted); font-size: .9rem; }
+.lib-problems { margin: 0; padding-left: 1.2rem; color: var(--wrong); font-size: .9rem; }
+.lib-list { list-style: none; margin: 0; padding: 0; max-height: 40vh; overflow-y: auto; }
+.lib-list li { display: flex; align-items: center; gap: .5rem; padding: .3rem 0; border-top: 1px solid var(--line); }
+.lib-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.lib-name small { color: var(--muted); }

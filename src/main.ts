@@ -1,5 +1,5 @@
 import './style.css';
-import { fetchManifest, layoutScore, loadScore, type ScoreEntry } from './score/load.ts';
+import { fetchBundled, fetchManifest, layoutScore, loadScore, type ScoreEntry } from './score/load.ts';
 import type { ScoreTiming } from './score/timeline.ts';
 import { CursorMap } from './score/cursor.ts';
 import { listenMidi } from './midi/input.ts';
@@ -10,11 +10,14 @@ import { align } from './engine/align.ts';
 import { CALIBRATION, estimateLatency } from './engine/calibration.ts';
 import { ReviewView } from './review/view.ts';
 import type { Hands, NoteEvent } from './types.ts';
+import { getScore, listScores } from './library/db.ts';
+import { LibraryDialog } from './library/dialog.ts';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
   <header class="bar">
     <select id="picker" aria-label="Score"></select>
+    <button id="library">Library</button>
     <div class="zoom" role="group" aria-label="Notation size">
       <button id="zoomOut" aria-label="Smaller">−</button>
       <output id="zoomLevel"></output>
@@ -51,6 +54,7 @@ app.innerHTML = `
     </span>
   </header>
   <p id="status" class="status"></p>
+  <p id="libHint" class="status hint" hidden>Add your own scores: <b>Library</b> → Add files or Link folder.</p>
   <p id="waitFeedback" class="wait-feedback" aria-live="polite" hidden></p>
   <div id="score" class="score"></div>
   <div id="strip" class="strip" hidden></div>
@@ -431,7 +435,7 @@ for (const b of handButtons) b.onclick = () => setHands(b.dataset.hands as Hands
 
 // Space starts/stops a tempo run from a computer keyboard.
 document.addEventListener('keydown', (e) => {
-  if (e.code !== 'Space' || mode !== 'tempo' || calib.open || (e.target as HTMLElement).matches('select, input')) return;
+  if (e.code !== 'Space' || mode !== 'tempo' || calib.open || library.dialog.open || (e.target as HTMLElement).matches('select, input')) return;
   e.preventDefault();
   startStop.click();
 });
@@ -474,7 +478,10 @@ async function show(entry: ScoreEntry) {
   lastRun = undefined;
   status.textContent = `Loading ${entry.title}…`;
   try {
-    const t = await loadScore(entry);
+    const data = entry.source === 'bundled' ? await fetchBundled(entry.path) : (await getScore(entry.id))?.data;
+    if (!data) throw new Error('it is no longer in the library');
+    if (mine !== seq) return;
+    const t = await loadScore(data, entry.title);
     if (mine !== seq) return;
     loaded = entry;
     timing = t;
@@ -525,6 +532,61 @@ picker.onchange = () => {
   if (entry) show(entry);
 };
 
+// ---- library ----------------------------------------------------------------
+
+let bundled: ScoreEntry[] = [];
+
+// Scores from the device first (they are the point of the app), then built-in.
+async function refreshEntries() {
+  let device: ScoreEntry[] = [];
+  try {
+    device = (await listScores())
+      .map((s): ScoreEntry => ({
+        id: s.id, title: s.title, composer: s.composer,
+        source: 'device', missing: s.missing, updatedAt: s.updatedAt,
+      }))
+      .sort((a, b) => a.title.localeCompare(b.title));
+  } catch (err) {
+    status.textContent = `Could not open the library: ${(err as Error).message}`;
+  }
+  entries = [...device, ...bundled];
+
+  const option = (e: ScoreEntry) => {
+    const label = e.composer ? `${e.title} (${e.composer})` : e.title;
+    return new Option(e.source === 'device' && e.missing ? `${label} (not in folder)` : label, e.id);
+  };
+  const group = (label: string, list: ScoreEntry[]) => {
+    const g = Object.assign(document.createElement('optgroup'), { label });
+    g.append(...list.map(option));
+    return g;
+  };
+  picker.replaceChildren(
+    ...(device.length ? [group('On this device', device)] : []),
+    ...(bundled.length ? [group('Built in', bundled)] : []),
+  );
+  if (loaded) picker.value = loaded.id;
+  $('libHint').hidden = device.length > 0;
+}
+
+const library = new LibraryDialog(async () => {
+  await refreshEntries();
+  if (!loaded) {
+    if (entries[0]) { picker.value = entries[0].id; show(entries[0]); }
+    return;
+  }
+  const now = entries.find((e) => e.id === loaded!.id);
+  // The score on screen was removed, or re-imported with changes: show the new state.
+  if (!now) {
+    const next = entries[0];
+    if (next) { picker.value = next.id; show(next); }
+    return;
+  }
+  const changed = now.source === 'device' && loaded.source === 'device' && now.updatedAt !== loaded.updatedAt;
+  if (changed && !run) show(now);
+  else loaded = now;
+});
+$('library').onclick = () => { stopRun(); library.open(); };
+
 // ---- MIDI -----------------------------------------------------------------
 
 listenMidi(onNote, (s) => {
@@ -563,16 +625,11 @@ setHands(hands);
 setSpeed(speed);
 
 try {
-  entries = await fetchManifest();
+  bundled = await fetchManifest();
 } catch (err) {
-  status.textContent = `Could not load the score list: ${(err as Error).message}`;
+  status.textContent = `Could not load the built-in score list: ${(err as Error).message}`;
 }
-
-if (entries.length === 0 && !status.textContent) {
-  status.textContent = 'No scores found. Put .musicxml files in public/scores/.';
-}
-picker.replaceChildren(...entries.map((e) =>
-  new Option(e.composer ? `${e.title} (${e.composer})` : e.title, e.id)));
+await refreshEntries();
 
 const initial = entries.find((e) => e.id === store.get('score'))
   ?? entries.find((e) => e.title === 'Minuet in G')
