@@ -104,11 +104,13 @@ export class ReviewView {
 
   private paint() {
     const a = this.alignment;
-    const c = a && context(a, this.settings);
+    const c = a && context(a, this.settings, this.speed);
     for (const [id, el] of this.noteEls) {
       const n = this.byNoteId.get(id);
       const on = !!(a && n);
       el.classList.toggle('review', on);
+      // Reviewing, but not in this run's report: after an early Stop.
+      el.classList.toggle('unreviewed', !!a && !n);
       el.classList.toggle('pedal', on && this.settings.layer === 'duration' && !!n!.pedal);
       if (on) (el as HTMLElement).style.setProperty('--note', colorFor(n!, this.settings, c!));
       else (el as HTMLElement).style.removeProperty('--note');
@@ -142,22 +144,24 @@ export class ReviewView {
     document.body.classList.toggle('reviewing', !!a);
     if (!a) { strip.replaceChildren(); return; }
     const s = this.settings;
+    const c = context(a, s, this.speed);
 
     const top = document.createElement('div');
     top.className = 'strip-row';
     top.append(
       segment('', ...LAYERS.map(([id, label]) => button(label, s.layer === id, () => this.set({ layer: id })))),
-      Object.assign(document.createElement('span'), { className: 'summary', textContent: summary(a, s) }),
+      Object.assign(document.createElement('span'), { className: 'summary', textContent: summary(a, s, c) }),
       Object.assign(button('Save run', false, () => this.opts.download(), 'Download this run as JSON'), { className: 'save' }),
     );
 
     const bottom = document.createElement('div');
     bottom.className = 'strip-row';
-    const lg = legend(s, context(a, s));
+    const lg = legend(s, c);
     if (lg) {
       const bar = document.createElement('div');
       bar.className = 'ramp';
       bar.style.setProperty('--ramp', lg.gradient);
+      bar.classList.toggle('tall', lg.ticks.some((t) => t.label.includes('\n')));
       for (const t of lg.ticks) {
         const tick = document.createElement('span');
         tick.style.left = `${t.at * 100}%`;

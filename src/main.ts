@@ -29,8 +29,8 @@ app.innerHTML = `
     </div>
     <div class="seg" id="hands" role="radiogroup" aria-label="Hands">
       <button data-hands="both" role="radio">Both</button>
-      <button data-hands="right" role="radio">Right</button>
       <button data-hands="left" role="radio">Left</button>
+      <button data-hands="right" role="radio">Right</button>
     </div>
     <span id="waitControls" class="group">
       <button id="restart">Restart</button>
@@ -92,9 +92,13 @@ const oneOf = <T extends string>(options: readonly T[], value: string | null, fa
 const SCALE_MIN = 20, SCALE_MAX = 100, SCALE_STEP = 5;
 let scale = Number(store.get('scale')) || 45;
 
-// Practice speed, as a fraction of the score's tempo.
-const SPEED_MIN = 0.4, SPEED_MAX = 1.5, SPEED_STEP = 0.05;
-let speed = Number(store.get('speed')) || 1;
+// Practice tempo in beats per minute, where a beat is the meter's pulse (a
+// dotted quarter in 6/8), remembered per score. −/+ step to the next multiple
+// of BPM_STEP; the score's own tempo is the default. The engine takes `speed`,
+// the practice tempo as a fraction of the score's.
+const BPM_STEP = 5, SPEED_MIN = 0.4, SPEED_MAX = 1.5;
+let practiceBpm = 0;
+let speed = 1;
 
 type Mode = 'wait' | 'tempo';
 let mode: Mode = oneOf(['wait', 'tempo'], store.get('mode'), 'wait');
@@ -205,10 +209,8 @@ function onNote(ev: NoteEvent) {
   if (!practice) return;
   const out = practice.handle(ev);
   if (out.length === 0) return;
-  for (const f of out) {
-    if (f.kind === 'wrong') flashWrong(f);
-    else if (f.kind === 'done') { waitFeedback.textContent = 'Well played!'; waitFeedback.className = 'wait-feedback good'; }
-  }
+  // The end needs no message: the progress already reads "Done · N wrong".
+  for (const f of out) if (f.kind === 'wrong') flashWrong(f);
   paint();
   follow();
 }
@@ -329,14 +331,32 @@ function downloadRun() {
 
 startStop.onclick = () => (run ? finishRun() : startRun());
 
-function setSpeed(next: number) {
-  speed = Math.round(Math.min(SPEED_MAX, Math.max(SPEED_MIN, next)) * 100) / 100;
-  store.set('speed', String(speed));
-  const bpm = timing ? ` · ${Math.round(timing.bpm * speed)} bpm` : '';
-  $('speed').textContent = `${Math.round(speed * 100)} %${bpm}`;
+// The score's own tempo in beats per minute, at its start. `bpm` is the exact
+// quarter-note tempo; beatMs is rounded to whole ms, so use it only for the beat
+// unit (½, 1, 1½, 2… quarters) rather than dividing by it (110 → 110.09).
+function scoreBpm(t: ScoreTiming) {
+  const beatMs = t.events[0]?.beatMs;
+  const quarters = beatMs ? Math.max(0.25, Math.round((beatMs * t.bpm) / 60000 * 4) / 4) : 1;
+  return t.bpm / quarters;
 }
-$('slower').onclick = () => setSpeed(speed - SPEED_STEP);
-$('faster').onclick = () => setSpeed(speed + SPEED_STEP);
+
+function setBpm(next: number) {
+  const output = $('speed');
+  if (!timing || !loaded) { output.textContent = '— bpm'; return; }
+  const base = scoreBpm(timing);
+  const lo = Math.max(BPM_STEP, Math.ceil((base * SPEED_MIN) / BPM_STEP) * BPM_STEP);
+  const hi = Math.floor((base * SPEED_MAX) / BPM_STEP) * BPM_STEP;
+  practiceBpm = Math.min(Math.max(next, lo), Math.max(hi, lo));
+  speed = practiceBpm / base;
+  store.set(`bpm:${loaded.id}`, String(practiceBpm));
+  output.textContent = `${Math.round(practiceBpm)} bpm · ${Math.round(speed * 100)} % · ${Math.round(60000 / practiceBpm)} ms`;
+  output.title = `Practice tempo · % of the score's ${Math.round(base)} bpm · one beat`;
+}
+// 72 → 75 → 80 up, 72 → 70 → 65 down. The tolerance absorbs float noise in the
+// score's tempo (110.0000001 must step down to 105, not to 110).
+const steps = (bpm: number) => bpm / BPM_STEP;
+$('slower').onclick = () => setBpm((Math.ceil(steps(practiceBpm) - 1e-6) - 1) * BPM_STEP);
+$('faster').onclick = () => setBpm((Math.floor(steps(practiceBpm) + 1e-6) + 1) * BPM_STEP);
 
 const clickButton = $<HTMLButtonElement>('click');
 function setClick(on: boolean) {
@@ -486,7 +506,7 @@ async function show(entry: ScoreEntry) {
     loaded = entry;
     timing = t;
     practice = new WaitMode(timing.events, hands);
-    setSpeed(speed);
+    setBpm(Number(store.get(`bpm:${entry.id}`)) || scoreBpm(timing));
     clearFeedback();
     clearWaitFeedback();
     await layout(mine);
@@ -609,9 +629,10 @@ if (import.meta.env.DEV) {
     __cursor: () => cursorMap,
     __review: () => review,
     // Feed a recording as if a run just finished, e.g. from a saved run file.
-    __replay: (recording: NoteEvent[], runSpeed = speed) => {
+    // `untilMs` (real ms from t0) simulates stopping the run early.
+    __replay: (recording: NoteEvent[], runSpeed = speed, untilMs = Infinity) => {
       if (mode !== 'tempo') setMode('tempo');
-      lastRun = { recording, speed: runSpeed, latencyMs: 0, recordedAt: new Date().toISOString(), untilMs: Infinity };
+      lastRun = { recording, speed: runSpeed, latencyMs: 0, recordedAt: new Date().toISOString(), untilMs };
       analyse();
     },
     __timing: () => timing,
@@ -622,7 +643,7 @@ if (import.meta.env.DEV) {
 
 setMode(mode);
 setHands(hands);
-setSpeed(speed);
+setBpm(0);
 
 try {
   bundled = await fetchManifest();

@@ -40,18 +40,21 @@ npm test         # alignment, calibration and library tests (Node, no browser)
   and advances once every note in it is pressed, and a wrong key flashes the
   expected notes red and does not advance.
 
-  **Tempo mode**: pick a speed, **Start** (or Space), one bar of count-in clicks,
+  **Tempo mode**: pick a tempo (−/+ in steps of 5 bpm; shown as bpm · % of the
+  score's tempo · one beat in ms, remembered per score), **Start** (or Space), one bar of count-in clicks,
   then play along with the cursor; 🔔 switches the metronome off after the
   count-in. Nothing is marked while you play. At the end (or **Stop**) the score
   shows the run in four colour layers, switched in the strip at the bottom:
-  **Notes** (played / missed / × extra key), **Timing** (blue early, black on
-  time, orange late, as % of a beat or of the note), **Duration** (% of the
-  written length held; blue ring = pedal down) and **Velocity**. Tap a note for
+  **Notes** (played / missed / × extra key), **Timing** (blue early, green on
+  time, amber to red late, as % of a beat or of the note), **Duration** (% of the
+  written length held, amber short to deep purple long; blue ring = pedal down)
+  and **Velocity** (teal soft to navy loud). Missed notes, the other hand and
+  notes after an early **Stop** are grey. Tap a note for
   its numbers. These are measurements, not grades. **Save run** downloads the
   raw recording as JSON. **⏱** calibrates latency: tap along with 8 clicks once
   per device.
 
-  **Both / Right / Left** picks the hand in either mode: the other staff greys
+  **Both / Left / Right** picks the hand in either mode: the other staff greys
   out and is not asked for. **Full screen** hides the browser bars on the tablet.
 
   No piano at hand? In the dev console, `__play(67)` presses G4,

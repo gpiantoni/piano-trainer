@@ -55,7 +55,7 @@ body {
 .seg button:last-child { border-radius: 0 .4rem .4rem 0; }
 .seg button[aria-checked="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 .bar .zoom button { padding: 0; }
-.speed { min-width: 6.5rem !important; }
+.speed { min-width: 11rem !important; }
 .bar button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); min-width: 5rem; }
 .bar button.primary.running { background: var(--wrong); border-color: var(--wrong); }
 #click { font-size: 1.2rem; }
@@ -75,7 +75,6 @@ body {
    header bar, so a long message never forces the toolbar to wrap and shift. */
 .wait-feedback { margin: 0 1rem .5rem; font-weight: 600; min-height: 1.6em; }
 .wait-feedback.wrong { color: var(--wrong); }
-.wait-feedback.good { color: var(--accent); }
 
 /* Verovio wraps bars to this width; the page scrolls vertically only. */
 .score { overflow-x: hidden; position: relative; }
@@ -104,9 +103,10 @@ g.note.wrong, g.note.wrong * { fill: var(--wrong); color: var(--wrong); }
 
 /* Colour comes from --note, set per notehead by the chosen layer. */
 g.note.review, g.note.review * { fill: var(--note); color: var(--note); }
+g.note.unreviewed, g.note.unreviewed * { fill: var(--muted-note); color: var(--muted-note); }
 g.note.review.pedal > .notehead use { stroke: var(--pedal); stroke-width: 70px; paint-order: stroke; }
 
-body.reviewing { padding-bottom: 7.5rem; }
+body.reviewing { padding-bottom: 8.5rem; }
 
 .strip {
   position: fixed;
@@ -137,17 +137,20 @@ body.reviewing { padding-bottom: 7.5rem; }
   flex: 1 1 16rem;
   max-width: 28rem;
   height: .8rem;
-  margin: 0 1.2rem 1.1rem;
+  margin: 0 1.6rem 1.1rem;
   border-radius: .4rem;
   background: var(--ramp);
 }
+.ramp.tall { margin-bottom: 2rem; }
 .ramp span {
   position: absolute;
   top: 1rem;
   transform: translateX(-50%);
   font-size: .75rem;
   color: var(--muted);
-  white-space: nowrap;
+  white-space: pre;           /* timing ticks: "+25 %" over "177 ms" */
+  text-align: center;
+  line-height: 1.15;
   font-variant-numeric: tabular-nums;
 }
 .key-legend { color: var(--muted); display: flex; align-items: center; gap: .35rem; }

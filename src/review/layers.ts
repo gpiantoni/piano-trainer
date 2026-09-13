@@ -1,7 +1,7 @@
 import type { Alignment, TimingReference } from '../engine/align.ts';
 import type { PlayedNote } from '../types.ts';
 import {
-  DURATION_RAMP, NOTES, NOT_MEASURED, TIMING, TIMING_LOG_KNEE, VELOCITY_RAMP,
+  DURATION_RAMP, NOTES, NOT_MEASURED, TIMING_LOG_KNEE, TIMING_RAMP, VELOCITY_RAMP,
 } from './palettes.ts';
 
 // PlayedNote -> colour, legend and one-line summary, per review layer.
@@ -52,23 +52,29 @@ function timingScale(pct: number, s: ReviewSettings): number {
   return Math.max(-1, Math.min(1, v));
 }
 
-export type Context = { velocityLo: number; velocityHi: number };
+export type Context = {
+  velocityLo: number;
+  velocityHi: number;
+  beatMs?: number;          // one beat in real ms at the run's speed, at the start
+};
 
-export function context(a: Alignment, s: ReviewSettings): Context {
+export function context(a: Alignment, s: ReviewSettings, speed: number): Context {
+  const first = a.notes[0]?.expected.beatMs;
+  const beatMs = first ? first / speed : undefined;
   const v = a.notes.flatMap((n) => (n.velocityPct === undefined ? [] : [n.velocityPct]));
-  if (!s.velocityFit || v.length < 2) return { velocityLo: 0, velocityHi: 100 };
+  if (!s.velocityFit || v.length < 2) return { velocityLo: 0, velocityHi: 100, beatMs };
   const lo = quantile(v, 0.05), hi = quantile(v, 0.95);
-  return hi - lo < 2 ? { velocityLo: Math.max(0, lo - 5), velocityHi: Math.min(100, hi + 5) } : { velocityLo: lo, velocityHi: hi };
+  return hi - lo < 2
+    ? { velocityLo: Math.max(0, lo - 5), velocityHi: Math.min(100, hi + 5), beatMs }
+    : { velocityLo: lo, velocityHi: hi, beatMs };
 }
 
 export function colorFor(n: PlayedNote, s: ReviewSettings, c: Context): string {
   if (s.layer === 'notes') return n.status === 'played' ? NOTES.played : NOTES.missed;
   if (n.status !== 'played') return NOT_MEASURED;
   switch (s.layer) {
-    case 'timing': {
-      const v = timingScale(n.deltaPct!, s);
-      return mix(TIMING.onTime, v < 0 ? TIMING.early : TIMING.late, Math.abs(v));
-    }
+    case 'timing':
+      return ramp(TIMING_RAMP, (timingScale(n.deltaPct!, s) + 1) / 2);
     case 'duration':
       return n.durationPct === undefined ? NOT_MEASURED : ramp(DURATION_RAMP, n.durationPct / s.durationMax);
     case 'velocity':
@@ -86,8 +92,12 @@ export function legend(s: ReviewSettings, c: Context): Legend | undefined {
       const r = s.timingRange;
       const values = s.timingLog ? [-r, -r / 5, 0, r / 5, r] : [-r, -r / 2, 0, r / 2, r];
       return {
-        gradient: `linear-gradient(in oklab to right, ${TIMING.early}, ${TIMING.onTime}, ${TIMING.late})`,
-        ticks: values.map((v) => ({ at: (timingScale(v, s) + 1) / 2, label: v === 0 ? 'on time' : `${signed(v, Math.abs(v) < 10 ? 1 : 0)} %` })),
+        gradient: `linear-gradient(in oklab to right, ${TIMING_RAMP.join(', ')})`,
+        // In % of a beat, also say how many ms that is at this speed.
+        ticks: values.map((v) => {
+          const ms = s.reference === 'beat' && c.beatMs ? `\n${Math.round((Math.abs(v) / 100) * c.beatMs)} ms` : '';
+          return { at: (timingScale(v, s) + 1) / 2, label: v === 0 ? 'on time' : `${signed(v, Math.abs(v) < 10 ? 1 : 0)} %${ms}` };
+        }),
       };
     }
     case 'duration': {
@@ -115,7 +125,7 @@ function byHand(notes: PlayedNote[], value: (n: PlayedNote) => number | undefine
   return parts.join(' · ');
 }
 
-export function summary(a: Alignment, s: ReviewSettings): string {
+export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
   const played = a.notes.filter((n) => n.status === 'played');
   switch (s.layer) {
     case 'notes': {
@@ -129,7 +139,8 @@ export function summary(a: Alignment, s: ReviewSettings): string {
       const ms = played.map((n) => n.deltaMs!);
       if (!pct.length) return 'nothing played';
       const iqr = quantile(pct, 0.75) - quantile(pct, 0.25);
-      return `median ${signed(quantile(pct, 0.5))} % (${signed(quantile(ms, 0.5))} ms) · spread (IQR) ${iqr.toFixed(0)} %`;
+      const beat = c.beatMs ? ` · 1 beat = ${Math.round(c.beatMs)} ms` : '';
+      return `median ${signed(quantile(pct, 0.5))} % (${signed(quantile(ms, 0.5))} ms) · spread (IQR) ${iqr.toFixed(0)} %${beat}`;
     }
     case 'duration':
       return byHand(played, (n) => n.durationPct, (x) => `${x.toFixed(0)} %`);
