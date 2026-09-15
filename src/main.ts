@@ -16,6 +16,7 @@ import {
   formatSection, inWindow, parseSection, playWindow, sectionFrom, sectionLabel,
   type PlayWindow, type Section,
 } from './score/section.ts';
+import { lastAtOrBefore } from './score/beats.ts';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
@@ -313,16 +314,20 @@ function staffBox(el: Element | null) {
   };
 }
 
-function placeBarMark() {
-  const m = picking?.first !== undefined ? timing?.measures[picking.first] : undefined;
+// Positions `div` over a measure's staves, with some room above and below.
+function placeOverMeasure(div: HTMLElement, m: { id: string } | undefined) {
   const r = m && staffBox(document.getElementById(m.id));
-  barMark.hidden = !r;
+  div.hidden = !r;
   if (!r) return;
   const base = score.getBoundingClientRect();
-  Object.assign(barMark.style, {
+  Object.assign(div.style, {
     left: `${r.left - base.left}px`, top: `${r.top - base.top - 8}px`,
     width: `${r.right - r.left}px`, height: `${r.bottom - r.top + 16}px`,
   });
+}
+
+function placeBarMark() {
+  placeOverMeasure(barMark, picking?.first !== undefined ? timing?.measures[picking.first] : undefined);
 }
 
 barsButton.onclick = () => {
@@ -356,9 +361,10 @@ score.addEventListener('click', (e) => {
 
 // ---- tempo mode -------------------------------------------------------------
 
-const cursor = document.createElement('div');
-cursor.className = 'cursor';
-cursor.hidden = true;
+// Tempo-mode indicator: a subtle fill over the whole bar being played, rather
+// than a moving line — a line implies a within-bar tempo the notes themselves
+// don't have (durations vary), which reads as more precise than it is.
+const cursor = Object.assign(document.createElement('div'), { className: 'bar-highlight', hidden: true });
 
 function cursorSystem() {
   const pos = run && cursorMap?.position(Math.max(run.window.startMs, run.scoreTime()));
@@ -366,11 +372,8 @@ function cursorSystem() {
 }
 
 function drawCursor(scoreMs: number) {
-  const pos = cursorMap?.position(scoreMs);
-  cursor.hidden = !pos;
-  if (!pos) return;
-  cursor.style.height = `${pos.bottom - pos.top}px`;
-  cursor.style.transform = `translate(${pos.x}px, ${pos.top}px)`;
+  const i = timing ? lastAtOrBefore(timing.measures, scoreMs, (m) => m.startMs) : -1;
+  placeOverMeasure(cursor, i >= 0 ? timing!.measures[i] : undefined);
 }
 
 let wakeLock: WakeLockSentinel | undefined;
@@ -399,8 +402,7 @@ function tick() {
   const t = run.scoreTime(now);
   drawCursor(Math.max(run.window.startMs, t));
   if (phase === 'countIn') {
-    const left = run.countInLeft(now);
-    feedback.textContent = left > 0 ? `${left}` : '';
+    feedback.textContent = `${run.countInNumber(now)}`;
     feedback.className = 'feedback count';
   } else if (feedback.classList.contains('count')) {
     clearFeedback();

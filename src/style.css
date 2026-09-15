@@ -79,17 +79,12 @@ body {
 /* Verovio wraps bars to this width; the page scrolls vertically only. */
 .score { overflow-x: hidden; position: relative; }
 
-/* Tempo-mode cursor: a soft band just left of the notes being played. Moved
-   with transform only, which stays smooth on the tablet. */
-.cursor {
+/* Tempo-mode indicator: a subtle fill over the whole bar being played. */
+.bar-highlight {
   position: absolute;
-  left: -6px;
-  top: 0;
-  width: 4px;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--cursor) 55%, transparent);
   pointer-events: none;
-  will-change: transform;
+  background: color-mix(in srgb, var(--cursor) 12%, transparent);
+  border-radius: .3rem;
 }
 .score svg { display: block; width: 100%; height: auto; }
 

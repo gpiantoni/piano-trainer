@@ -49,9 +49,12 @@ export class TempoRun {
     return t < this.window.startMs ? 'countIn' : t > this.endScoreMs ? 'finished' : 'playing';
   }
 
-  // Count-in clicks still to come (for the "3 · 2 · 1" display).
-  countInLeft(now = performance.now()) {
-    return this.window.countIn.filter((c) => this.realAt(c.t) > now).length;
+  // Count-in beat number, counted up ("1 · 2 · 3") to match how a player
+  // counts tempo aloud. A number stays on screen for the beat *after* its
+  // click sounds, and "1" also covers the lead-in before the first click.
+  countInNumber(now = performance.now()) {
+    const sounded = this.window.countIn.length - this.window.countIn.filter((c) => this.realAt(c.t) > now).length;
+    return Math.max(sounded, 1);
   }
 
   record(ev: NoteEvent) {

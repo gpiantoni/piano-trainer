@@ -13,7 +13,7 @@ const TICK_MS = 25;
 
 export class Metronome {
   enabled = true;
-  volume = 0.5;
+  volume = 1;
   private ctx: AudioContext | undefined;
   private timer: number | undefined;
   private queue: Click[] = [];
@@ -81,7 +81,7 @@ export class Metronome {
     const ctx = this.ctx!;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.type = 'triangle';
+    osc.type = 'square';
     osc.frequency.value = accent ? 1760 : 1175;
     const peak = this.volume * (accent ? 1 : 0.7);
     gain.gain.setValueAtTime(0.0001, at);
