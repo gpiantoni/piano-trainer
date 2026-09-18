@@ -1,7 +1,7 @@
 import type { VerovioToolkit } from 'verovio/esm';
 import type { ExpectedEvent, Staff } from '../types.ts';
 import {
-  buildBeats, buildMeasures, countIn, lastAtOrBefore, measureNumbers, metersByMeasure,
+  buildBeats, buildMeasures, buildSubdivisions, countIn, lastAtOrBefore, measureNumbers, metersByMeasure,
   type Beat, type Measure, type TimemapEntry,
 } from './beats.ts';
 
@@ -10,7 +10,8 @@ export type ScoreTiming = {
   events: ExpectedEvent[];
   measures: Measure[];
   beats: Beat[];
-  countIn: { t: number; accent: boolean }[];   // before score time 0, 1.0× ms
+  subdivisions: number[];                     // "and" ticks halfway between beats
+  countIn: { t: number; accent: boolean; sub?: boolean }[];   // before score time 0, 1.0× ms
   onsets: { t: number; ids: string[] }[];     // notes and rests starting together: cursor anchors
   bpm: number;                                // quarter-note tempo at the start
   endMs: number;
@@ -117,6 +118,7 @@ export function buildTimeline(tk: VerovioToolkit): ScoreTiming {
     events: sorted,
     measures,
     beats,
+    subdivisions: buildSubdivisions(measures, map),
     countIn: countIn(measures, beats, map),
     onsets,
     bpm: map.find((e) => e.tempo)?.tempo ?? 120,

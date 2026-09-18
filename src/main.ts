@@ -51,6 +51,7 @@ app.innerHTML = `
         <button id="faster" aria-label="Faster">+</button>
       </span>
       <button id="click" role="switch" aria-label="Metronome">🔔</button>
+      <button id="subdivide" role="switch" aria-label="Eighth-note click">♩</button>
       <button id="latency" title="Latency calibration">⏱ 0 ms</button>
       <button id="startStop" class="primary">Start</button>
     </span>
@@ -106,7 +107,7 @@ let scale = Number(store.get('scale')) || 45;
 // dotted quarter in 6/8), remembered per score. −/+ step to the next multiple
 // of BPM_STEP; the score's own tempo is the default. The engine takes `speed`,
 // the practice tempo as a fraction of the score's.
-const BPM_STEP = 5, SPEED_MIN = 0.4, SPEED_MAX = 1.5;
+const BPM_STEP = 5, BPM_MIN = 30, SPEED_MAX = 1.5;
 let practiceBpm = 0;
 let speed = 1;
 
@@ -134,6 +135,7 @@ let lastRun: LastRun | undefined;
 
 const metronome = new Metronome();
 metronome.enabled = store.get('click') !== 'off';
+metronome.subdivide = store.get('subdivide') === 'on';
 
 const review = new ReviewView({
   score,
@@ -474,7 +476,7 @@ function setBpm(next: number) {
   const output = $('speed');
   if (!timing || !loaded) { output.textContent = '— bpm'; return; }
   const base = scoreBpm(timing);
-  const lo = Math.max(BPM_STEP, Math.ceil((base * SPEED_MIN) / BPM_STEP) * BPM_STEP);
+  const lo = Math.max(BPM_STEP, BPM_MIN);
   const hi = Math.floor((base * SPEED_MAX) / BPM_STEP) * BPM_STEP;
   practiceBpm = Math.min(Math.max(next, lo), Math.max(hi, lo));
   speed = practiceBpm / base;
@@ -497,7 +499,18 @@ function setClick(on: boolean) {
   clickButton.title = on ? 'Metronome on (count-in always clicks)' : 'Metronome off (count-in still clicks)';
 }
 clickButton.onclick = () => setClick(!metronome.enabled);
+
+const subdivideButton = $<HTMLButtonElement>('subdivide');
+function setSubdivide(on: boolean) {
+  metronome.subdivide = on;
+  store.set('subdivide', on ? 'on' : 'off');
+  subdivideButton.setAttribute('aria-checked', String(on));
+  subdivideButton.textContent = on ? '♫' : '♩';
+  subdivideButton.title = on ? 'Eighth-note click on ("1 and 2 and")' : 'Eighth-note click off';
+}
+subdivideButton.onclick = () => setSubdivide(!metronome.subdivide);
 setClick(metronome.enabled);
+setSubdivide(metronome.subdivide);
 
 // ---- latency calibration ----------------------------------------------------
 

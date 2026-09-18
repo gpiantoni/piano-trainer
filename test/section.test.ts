@@ -19,7 +19,7 @@ function timing(): ScoreTiming {
     id: `n${k}`, tiedIds: [], pitch: 60 + k, onMs: b.t, offMs: b.t + BEAT, staff: 1, beatMs: BEAT, measure: b.measure,
   }));
   return {
-    events, measures, beats, onsets: [], bpm: 120, endMs: 4 * BAR,
+    events, measures, beats, subdivisions: [], onsets: [], bpm: 120, endMs: 4 * BAR,
     countIn: [-3, -2, -1].map((k) => ({ t: k * BEAT, accent: k === -3 })),
   };
 }
@@ -35,7 +35,11 @@ test('a section in the middle: one bar of count-in before its downbeat', () => {
   const t = timing();
   const w = playWindow(t, { from: 1, to: 2 });
   assert.deepEqual([w.startMs, w.endMs], [BAR, 3 * BAR]);
-  assert.deepEqual(w.countIn, [{ t: 0, accent: true }, { t: 500, accent: false }, { t: 1000, accent: false }]);
+  assert.deepEqual(w.countIn, [
+    { t: 0, accent: true }, { t: 250, accent: false, sub: true },
+    { t: 500, accent: false }, { t: 750, accent: false, sub: true },
+    { t: 1000, accent: false }, { t: 1250, accent: false, sub: true },
+  ]);
   assert.equal(inWindow(w, BAR), true);
   assert.equal(inWindow(w, BAR - 1), false);
   assert.equal(inWindow(w, 3 * BAR), false);      // the next bar's downbeat is outside
@@ -65,7 +69,7 @@ test('tempo run over a section: clicks, phases and end', () => {
   assert.equal(run.realAt(0), now + 300);
   assert.equal(run.realAt(BAR), now + 300 + BAR / speed);
   const always = run.clicks.filter((c) => c.always), beats = run.clicks.filter((c) => !c.always);
-  assert.equal(always.length, 3);
+  assert.equal(always.length, 6);                   // one bar of count-in, "and" after each beat
   assert.equal(beats.length, 6);                    // two bars of three
   assert.equal(beats[0].at, run.realAt(BAR));
   assert.equal(run.phase(run.realAt(BAR) - 1), 'countIn');

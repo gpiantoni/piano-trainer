@@ -128,10 +128,28 @@ export function buildBeats(measures: Measure[], map: TimemapEntry[]): Beat[] {
   return beats;
 }
 
+// Halfway points between each main beat ("...and...") for both count-in and
+// play, so the metronome can tick "1 and 2 and" like a teacher counting aloud.
+export function buildSubdivisions(measures: Measure[], map: TimemapEntry[]): number[] {
+  const toMs = qToMs(map);
+  const qs: number[] = [];
+  measures.forEach((m, i) => {
+    const step = beatQ(m.meter);
+    const off = step / 2;
+    if (i === 0 && isPickup(measures)) {
+      for (let q = m.endQ - off; q >= m.startQ - EPS; q -= step) qs.unshift(q);
+    } else {
+      for (let q = m.startQ + off; q < m.endQ - EPS; q += step) qs.push(q);
+    }
+  });
+  return qs.map(toMs);
+}
+
 // Count-in clicks before the first beat: one full bar, plus the beats a pickup
 // bar is missing, so the first note falls where the ear expects it. Offsets are
 // score ms at 1.0× (negative, before the first beat); divide by speed for real ms.
-export function countIn(measures: Measure[], beats: Beat[], map: TimemapEntry[]): { t: number; accent: boolean }[] {
+// A subdivision click ("and") follows each beat, halfway to the next.
+export function countIn(measures: Measure[], beats: Beat[], map: TimemapEntry[]): { t: number; accent: boolean; sub?: boolean }[] {
   const first = measures[0];
   if (!first || beats.length === 0) return [];
   const perBar = beatsPerBar(first.meter);
@@ -139,8 +157,11 @@ export function countIn(measures: Measure[], beats: Beat[], map: TimemapEntry[])
   const n = perBar + (inPickup ? perBar - inPickup : 0);
   const toMs = qToMs(map);
   const beatMs = toMs(first.startQ + beatQ(first.meter)) - toMs(first.startQ);
-  const out = [];
-  for (let k = n; k >= 1; k--) out.push({ t: beats[0].t - k * beatMs, accent: (n - k) % perBar === 0 });
+  const out: { t: number; accent: boolean; sub?: boolean }[] = [];
+  for (let k = n; k >= 1; k--) {
+    out.push({ t: beats[0].t - k * beatMs, accent: (n - k) % perBar === 0 });
+    out.push({ t: beats[0].t - k * beatMs + beatMs / 2, accent: false, sub: true });
+  }
   return out;
 }
 

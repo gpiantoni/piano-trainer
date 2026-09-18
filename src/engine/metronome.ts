@@ -6,6 +6,7 @@ export type Click = {
   at: number;          // performance.now() ms at which the click should be *heard*
   accent: boolean;
   always: boolean;     // count-in clicks sound even with the metronome switched off
+  sub?: boolean;       // an "and": halfway between two beats, in its own sound
 };
 
 const LOOKAHEAD_S = 0.12;
@@ -13,6 +14,7 @@ const TICK_MS = 25;
 
 export class Metronome {
   enabled = true;
+  subdivide = false;   // click the "and" halfway between beats too
   volume = 1;
   private ctx: AudioContext | undefined;
   private timer: number | undefined;
@@ -70,26 +72,28 @@ export class Metronome {
       const at = this.toAudio(click.at);
       if (at > horizon) break;
       this.next++;
-      if (at < ctx.currentTime - 0.01 || !(click.always || this.enabled)) continue;
-      this.click(Math.max(at, ctx.currentTime), click.accent);
+      const audible = click.always || this.enabled;
+      if (at < ctx.currentTime - 0.01 || !audible || (click.sub && !this.subdivide)) continue;
+      this.click(Math.max(at, ctx.currentTime), click.accent, click.sub);
     }
     this.sources = this.sources.filter((s) => s.end > ctx.currentTime);
     if (this.next >= this.queue.length && this.sources.length === 0) clearInterval(this.timer);
   }
 
-  private click(at: number, accent: boolean) {
+  private click(at: number, accent: boolean, sub = false) {
     const ctx = this.ctx!;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'square';
-    osc.frequency.value = accent ? 1760 : 1175;
+    osc.frequency.value = sub ? 2600 : accent ? 1760 : 1175;
     const peak = this.volume * (accent ? 1 : 0.7);
+    const decay = 0.05;
     gain.gain.setValueAtTime(0.0001, at);
     gain.gain.exponentialRampToValueAtTime(peak, at + 0.002);
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + decay);
     osc.connect(gain).connect(ctx.destination);
     osc.start(at);
-    osc.stop(at + 0.06);
-    this.sources.push({ osc, end: at + 0.06 });
+    osc.stop(at + decay + 0.01);
+    this.sources.push({ osc, end: at + decay + 0.01 });
   }
 }

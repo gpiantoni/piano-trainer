@@ -31,9 +31,11 @@ export class TempoRun {
     const firstClick = Math.min(window.startMs, window.countIn[0]?.t ?? window.startMs);
     this.t0 = now + LEAD_MS - firstClick / speed;
     const beats = timing.beats.filter((b) => b.t >= window.startMs - 1e-6 && b.t < window.endMs - 1e-6);
+    const subs = timing.subdivisions.filter((t) => t >= window.startMs - 1e-6 && t < window.endMs - 1e-6);
     this.clicks = [
-      ...window.countIn.map((c) => ({ at: this.realAt(c.t), accent: c.accent, always: true })),
+      ...window.countIn.map((c) => ({ at: this.realAt(c.t), accent: c.accent, always: true, sub: c.sub })),
       ...beats.map((b) => ({ at: this.realAt(b.t), accent: b.downbeat, always: false })),
+      ...subs.map((t) => ({ at: this.realAt(t), accent: false, always: false, sub: true })),
     ];
     const lastBeat = beats.at(-1) ?? timing.beats.at(-1), prevBeat = beats.at(-2) ?? timing.beats.at(-2);
     const beatMs = lastBeat && prevBeat ? lastBeat.t - prevBeat.t : 500;
@@ -53,7 +55,8 @@ export class TempoRun {
   // counts tempo aloud. A number stays on screen for the beat *after* its
   // click sounds, and "1" also covers the lead-in before the first click.
   countInNumber(now = performance.now()) {
-    const sounded = this.window.countIn.length - this.window.countIn.filter((c) => this.realAt(c.t) > now).length;
+    const beats = this.window.countIn.filter((c) => !c.sub);
+    const sounded = beats.length - beats.filter((c) => this.realAt(c.t) > now).length;
     return Math.max(sounded, 1);
   }
 

@@ -9,7 +9,7 @@ import type { ScoreTiming } from './timeline.ts';
 
 export type Section = { from: number; to: number };   // measure indices, inclusive, performance order
 
-export type Click = { t: number; accent: boolean };
+export type Click = { t: number; accent: boolean; sub?: boolean };
 
 export type PlayWindow = {
   startMs: number;     // score time of the first downbeat played
@@ -34,10 +34,12 @@ export function playWindow(timing: ScoreTiming, section?: Section): PlayWindow {
   const perBar = beatsPerBar(first.meter);
   const beats = timing.beats.filter((b) => b.measure === section.from);
   const beatMs = beats.length > 1 ? beats[1].t - beats[0].t : (first.endMs - first.startMs) / perBar;
-  const countIn = Array.from({ length: perBar }, (_, i) => ({
-    t: first.startMs - (perBar - i) * beatMs,
-    accent: i === 0,
-  }));
+  const countIn: Click[] = [];
+  for (let i = 0; i < perBar; i++) {
+    const t = first.startMs - (perBar - i) * beatMs;
+    countIn.push({ t, accent: i === 0 });
+    countIn.push({ t: t + beatMs / 2, accent: false, sub: true });
+  }
   return { startMs: first.startMs, endMs: last.endMs, countIn, section };
 }
 
