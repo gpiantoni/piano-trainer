@@ -38,4 +38,4 @@ export const VELOCITY_RAMP = ['#41b6c4', '#1d91c0', '#225ea8', '#253494', '#081d
 
 export const PEDAL_RING = '#0ea5e9';
 
-export const MATCH_WINDOWS = [0.5, 1, 2, 4];           // beats
+export const MATCH_WINDOWS = [0.1, 0.25, 0.5, 1];       // × beat

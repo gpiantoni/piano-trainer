@@ -127,16 +127,36 @@ body.reviewing { padding-bottom: 8.5rem; }
 .opt { display: flex; align-items: center; gap: .4rem; }
 .opt-label { color: var(--muted); }
 
-.ramp {
-  position: relative;
+.ramp-wrap {
   flex: 1 1 16rem;
   max-width: 28rem;
-  height: .8rem;
   margin: 0 1.6rem 1.1rem;
+}
+.ramp-wrap.tall { margin-bottom: 2rem; }
+.ramp {
+  position: relative;
+  height: .8rem;
   border-radius: .4rem;
   background: var(--ramp);
 }
-.ramp.tall { margin-bottom: 2rem; }
+/* A strip plot of every played note's value for this layer, on the same axis
+   as the ramp below it: ticks stack up (via opacity) where values cluster,
+   giving a rough histogram for free. */
+.dist {
+  position: relative;
+  height: .6rem;
+  margin-bottom: .15rem;
+  pointer-events: none;
+}
+.dist i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--fg);
+  opacity: .3;
+}
 .ramp span {
   position: absolute;
   top: 1rem;

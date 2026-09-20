@@ -2,7 +2,7 @@ import type { Alignment } from '../engine/align.ts';
 import type { CursorMap } from '../score/cursor.ts';
 import type { PlayedNote } from '../types.ts';
 import {
-  DEFAULT_SETTINGS, colorFor, context, describe, legend, pitchName, summary,
+  DEFAULT_SETTINGS, colorFor, context, describe, distribution, legend, pitchName, summary,
   type Layer, type ReviewSettings,
 } from './layers.ts';
 import { DURATION_RANGES, MATCH_WINDOWS, TIMING_RANGES } from './palettes.ts';
@@ -158,25 +158,38 @@ export class ReviewView {
     bottom.className = 'strip-row';
     const lg = legend(s, c);
     if (lg) {
+      const wrap = document.createElement('div');
+      wrap.className = 'ramp-wrap';
+      wrap.classList.toggle('tall', lg.ticks.some((t) => t.label.includes('\n')));
+
+      const dist = document.createElement('div');
+      dist.className = 'dist';
+      for (const x of distribution(a, s, c)) {
+        const tick = document.createElement('i');
+        tick.style.left = `${x * 100}%`;
+        dist.append(tick);
+      }
+      wrap.append(dist);
+
       const bar = document.createElement('div');
       bar.className = 'ramp';
       bar.style.setProperty('--ramp', lg.gradient);
-      bar.classList.toggle('tall', lg.ticks.some((t) => t.label.includes('\n')));
       for (const t of lg.ticks) {
         const tick = document.createElement('span');
         tick.style.left = `${t.at * 100}%`;
         tick.textContent = t.label;
         bar.append(tick);
       }
-      bottom.append(bar);
+      wrap.append(bar);
+      bottom.append(wrap);
     }
 
     switch (s.layer) {
       case 'notes':
         bottom.append(
-          segment('match window', ...MATCH_WINDOWS.map((w) =>
-            button(w === 0.5 ? '½ beat' : `${w} beat${w > 1 ? 's' : ''}`, s.maxOffsetBeats === w, () => this.set({ maxOffsetBeats: w }),
-              'How far off a key may be and still count as that note'))),
+          segment('match window ±', ...MATCH_WINDOWS.map((w) =>
+            button(`${Math.round(w * 100)} %`, s.maxOffsetBeats === w, () => this.set({ maxOffsetBeats: w }),
+              'How far off a key may be and still count as that note, as % of a beat'))),
           Object.assign(document.createElement('span'), {
             className: 'key-legend',
             innerHTML: '<i class="k played"></i>played <i class="k missed"></i>missed <b class="k-x">×</b> extra key',

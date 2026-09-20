@@ -69,17 +69,39 @@ export function context(a: Alignment, s: ReviewSettings, speed: number): Context
     : { velocityLo: lo, velocityHi: hi, beatMs };
 }
 
+// Where a played note sits on the current layer's [0, 1] ramp, or undefined
+// if this layer doesn't measure it (e.g. a grace note has no durationPct).
+// Shared by colorFor (the notehead colour) and distribution (the strip plot),
+// so the dots always line up with the ramp under them.
+function position(n: PlayedNote, s: ReviewSettings, c: Context): number | undefined {
+  switch (s.layer) {
+    case 'notes':
+      return undefined;
+    case 'timing':
+      return (timingScale(n.deltaPct!, s) + 1) / 2;
+    case 'duration':
+      return n.durationPct === undefined ? undefined : n.durationPct / s.durationMax;
+    case 'velocity':
+      return (n.velocityPct! - c.velocityLo) / (c.velocityHi - c.velocityLo);
+  }
+}
+
 export function colorFor(n: PlayedNote, s: ReviewSettings, c: Context): string {
   if (s.layer === 'notes') return n.status === 'played' ? NOTES.played : NOTES.missed;
   if (n.status !== 'played') return NOT_MEASURED;
-  switch (s.layer) {
-    case 'timing':
-      return ramp(TIMING_RAMP, (timingScale(n.deltaPct!, s) + 1) / 2);
-    case 'duration':
-      return n.durationPct === undefined ? NOT_MEASURED : ramp(DURATION_RAMP, n.durationPct / s.durationMax);
-    case 'velocity':
-      return ramp(VELOCITY_RAMP, (n.velocityPct! - c.velocityLo) / (c.velocityHi - c.velocityLo));
-  }
+  const pos = position(n, s, c);
+  const ramps = { timing: TIMING_RAMP, duration: DURATION_RAMP, velocity: VELOCITY_RAMP };
+  return pos === undefined ? NOT_MEASURED : ramp(ramps[s.layer], pos);
+}
+
+// Every played note, positioned on the same [0, 1] axis as the layer's ramp:
+// a strip plot to draw directly over it. Empty for the "notes" layer, which
+// has no ramp.
+export function distribution(a: Alignment, s: ReviewSettings, c: Context): number[] {
+  if (s.layer === 'notes') return [];
+  return a.notes
+    .filter((n) => n.status === 'played')
+    .flatMap((n) => { const pos = position(n, s, c); return pos === undefined ? [] : [clamp01(pos)]; });
 }
 
 const signed = (x: number, digits = 0) => `${x > 0 ? '+' : x < 0 ? '−' : '±'}${Math.abs(x).toFixed(digits)}`;
@@ -135,12 +157,22 @@ export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
       return `${played.length} / ${a.notes.length} played · ${missed} missed${wrong ? ` (${wrong} wrong key)` : ''} · ${extras} extra`;
     }
     case 'timing': {
+      if (!played.length) return 'nothing played';
+      const fmt = (ns: PlayedNote[]) =>
+        `${signed(quantile(ns.map((n) => n.deltaPct!), 0.5))} % (${signed(quantile(ns.map((n) => n.deltaMs!), 0.5))} ms)`;
+      const rh = played.filter((n) => n.expected.staff === 1);
+      const lh = played.filter((n) => n.expected.staff === 2);
+      const parts = [`median ${fmt(played)}`];
+      if (rh.length && lh.length) parts.push(`RH ${fmt(rh)}`, `LH ${fmt(lh)}`);
       const pct = played.map((n) => n.deltaPct!);
-      const ms = played.map((n) => n.deltaMs!);
-      if (!pct.length) return 'nothing played';
       const iqr = quantile(pct, 0.75) - quantile(pct, 0.25);
-      const beat = c.beatMs ? ` · 1 beat = ${Math.round(c.beatMs)} ms` : '';
-      return `median ${signed(quantile(pct, 0.5))} % (${signed(quantile(ms, 0.5))} ms) · spread (IQR) ${iqr.toFixed(0)} %${beat}`;
+      parts.push(`spread (IQR) ${iqr.toFixed(0)} %`);
+      const r = s.timingRange;
+      const within = (played.filter((n) => Math.abs(n.deltaPct!) <= r).length / played.length) * 100;
+      const ms = s.reference === 'beat' && c.beatMs ? ` (±${Math.round((r / 100) * c.beatMs)} ms)` : '';
+      parts.push(`${within.toFixed(0)} % within ±${r} %${ms}`);
+      if (c.beatMs) parts.push(`1 beat = ${Math.round(c.beatMs)} ms`);
+      return parts.join(' · ');
     }
     case 'duration':
       return byHand(played, (n) => n.durationPct, (x) => `${x.toFixed(0)} %`);
