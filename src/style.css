@@ -123,7 +123,9 @@ body.reviewing { padding-bottom: 8.5rem; }
 .strip .seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 .strip .seg.small button { min-height: 2.1rem; padding: 0 .6rem; }
 .summary { font-variant-numeric: tabular-nums; }
-.strip .save { margin-left: auto; color: var(--muted); }
+.strip .push-right { margin-left: auto; }
+.strip .save { color: var(--muted); }
+.strip button:disabled { opacity: .4; }
 .opt { display: flex; align-items: center; gap: .4rem; }
 .opt-label { color: var(--muted); }
 

@@ -17,12 +17,16 @@ export type ReviewSettings = {
   timingLog: boolean;
   durationMax: number;     // %
   velocityFit: boolean;    // fit the ramp to this run instead of 0–100
+  recenter: boolean;       // shift timing's zero to this run's own mean offset
 };
 
 export const DEFAULT_SETTINGS: ReviewSettings = {
   layer: 'notes', maxOffsetBeats: 1, reference: 'beat',
-  timingRange: 25, timingLog: false, durationMax: 150, velocityFit: false,
+  timingRange: 25, timingLog: false, durationMax: 150, velocityFit: false, recenter: false,
 };
+
+// Below this many timed notes, a mean offset is too noisy to zero against.
+export const RECENTER_MIN_NOTES = 50;
 
 export type Legend = { gradient: string; ticks: { at: number; label: string }[] };
 
@@ -56,17 +60,32 @@ export type Context = {
   velocityLo: number;
   velocityHi: number;
   beatMs?: number;          // one beat in real ms at the run's speed, at the start
+  timingBiasPct: number;    // subtracted from deltaPct when recenter is on and there's enough data; 0 otherwise
+  timingBiasMs: number;
 };
+
+const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+
+// This run's own mean timing offset, to zero against instead of the score.
+// Needs RECENTER_MIN_NOTES played notes or it's too noisy to trust.
+function timingBias(a: Alignment, s: ReviewSettings): { timingBiasPct: number; timingBiasMs: number } {
+  if (!s.recenter) return { timingBiasPct: 0, timingBiasMs: 0 };
+  const played = a.notes.filter((n) => n.status === 'played' && n.deltaPct !== undefined);
+  if (played.length < RECENTER_MIN_NOTES) return { timingBiasPct: 0, timingBiasMs: 0 };
+  return { timingBiasPct: mean(played.map((n) => n.deltaPct!)), timingBiasMs: mean(played.map((n) => n.deltaMs!)) };
+}
 
 export function context(a: Alignment, s: ReviewSettings, speed: number): Context {
   const first = a.notes[0]?.expected.beatMs;
   const beatMs = first ? first / speed : undefined;
   const v = a.notes.flatMap((n) => (n.velocityPct === undefined ? [] : [n.velocityPct]));
-  if (!s.velocityFit || v.length < 2) return { velocityLo: 0, velocityHi: 100, beatMs };
-  const lo = quantile(v, 0.05), hi = quantile(v, 0.95);
-  return hi - lo < 2
-    ? { velocityLo: Math.max(0, lo - 5), velocityHi: Math.min(100, hi + 5), beatMs }
-    : { velocityLo: lo, velocityHi: hi, beatMs };
+  let velocityLo = 0, velocityHi = 100;
+  if (s.velocityFit && v.length >= 2) {
+    const lo = quantile(v, 0.05), hi = quantile(v, 0.95);
+    if (hi - lo < 2) { velocityLo = Math.max(0, lo - 5); velocityHi = Math.min(100, hi + 5); }
+    else { velocityLo = lo; velocityHi = hi; }
+  }
+  return { velocityLo, velocityHi, beatMs, ...timingBias(a, s) };
 }
 
 // Where a played note sits on the current layer's [0, 1] ramp, or undefined
@@ -78,7 +97,7 @@ function position(n: PlayedNote, s: ReviewSettings, c: Context): number | undefi
     case 'notes':
       return undefined;
     case 'timing':
-      return (timingScale(n.deltaPct!, s) + 1) / 2;
+      return (timingScale(n.deltaPct! - c.timingBiasPct, s) + 1) / 2;
     case 'duration':
       return n.durationPct === undefined ? undefined : n.durationPct / s.durationMax;
     case 'velocity':
@@ -159,12 +178,18 @@ export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
     case 'timing': {
       if (!played.length) return 'nothing played';
       const fmt = (ns: PlayedNote[]) =>
-        `${signed(quantile(ns.map((n) => n.deltaPct!), 0.5))} % (${signed(quantile(ns.map((n) => n.deltaMs!), 0.5))} ms)`;
+        `${signed(quantile(ns.map((n) => n.deltaPct! - c.timingBiasPct), 0.5))} % `
+        + `(${signed(quantile(ns.map((n) => n.deltaMs! - c.timingBiasMs), 0.5))} ms)`;
       const rh = played.filter((n) => n.expected.staff === 1);
       const lh = played.filter((n) => n.expected.staff === 2);
       const parts = [`median ${fmt(played)}`];
       if (rh.length && lh.length) parts.push(`RH ${fmt(rh)}`, `LH ${fmt(lh)}`);
       if (c.beatMs) parts.push(`1 beat = ${Math.round(c.beatMs)} ms`);
+      if (s.recenter) {
+        parts.push(c.timingBiasPct !== 0 || c.timingBiasMs !== 0
+          ? `recentered, ${signed(c.timingBiasPct, 1)} % (${signed(Math.round(c.timingBiasMs))} ms) removed`
+          : `recenter needs ≥ ${RECENTER_MIN_NOTES} notes (${played.length} played)`);
+      }
       return parts.join(' · ');
     }
     case 'duration':
@@ -178,14 +203,15 @@ const NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A�
 export const pitchName = (p: number) => `${NAMES[p % 12]}${Math.floor(p / 12) - 1}`;
 
 // Everything about one note at once, for the tap popover.
-export function describe(n: PlayedNote, reference: TimingReference): string {
+export function describe(n: PlayedNote, reference: TimingReference, bias?: { pct: number; ms: number }): string {
   const name = pitchName(n.expected.pitch);
   if (n.status !== 'played') {
     return n.wrongPitch !== undefined ? `${name} · missed (played ${pitchName(n.wrongPitch)})` : `${name} · missed`;
   }
+  const deltaMs = n.deltaMs! - (bias?.ms ?? 0), deltaPct = n.deltaPct! - (bias?.pct ?? 0);
   const parts = [
     name,
-    `${signed(n.deltaMs!)} ms (${signed(n.deltaPct!)} % ${reference === 'beat' ? 'of beat' : 'of note'})`,
+    `${signed(deltaMs)} ms (${signed(deltaPct)} % ${reference === 'beat' ? 'of beat' : 'of note'})`,
     n.heldMs === undefined ? 'still held' : `held ${n.heldMs.toFixed(0)} ms (${n.durationPct?.toFixed(0) ?? '—'} %)`,
     `vel ${n.velocity} (${n.velocityPct!.toFixed(0)} %)`,
   ];

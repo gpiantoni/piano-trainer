@@ -2,7 +2,7 @@ import type { Alignment } from '../engine/align.ts';
 import type { CursorMap } from '../score/cursor.ts';
 import type { PlayedNote } from '../types.ts';
 import {
-  DEFAULT_SETTINGS, colorFor, context, describe, distribution, legend, pitchName, summary,
+  DEFAULT_SETTINGS, RECENTER_MIN_NOTES, colorFor, context, describe, distribution, legend, pitchName, summary,
   type Layer, type ReviewSettings,
 } from './layers.ts';
 import { DURATION_RANGES, MATCH_WINDOWS, TIMING_RANGES } from './palettes.ts';
@@ -146,11 +146,21 @@ export class ReviewView {
     const s = this.settings;
     const c = context(a, s, this.speed);
 
+    const timingPlayed = a.notes.filter((n) => n.status === 'played' && n.deltaPct !== undefined).length;
+    const canRecenter = timingPlayed >= RECENTER_MIN_NOTES;
+    const recenterOpt = segment('', button('Recenter', s.recenter, () => this.set({ recenter: !s.recenter }),
+      canRecenter
+        ? "Shift timing's zero to this run's own mean offset, so a consistent lag or rush reads as on-time"
+        : `Needs ≥ ${RECENTER_MIN_NOTES} timed notes (this run has ${timingPlayed})`));
+    recenterOpt.classList.add('push-right');
+    (recenterOpt.querySelector('button') as HTMLButtonElement).disabled = !canRecenter;
+
     const top = document.createElement('div');
     top.className = 'strip-row';
     top.append(
       segment('', ...LAYERS.map(([id, label]) => button(label, s.layer === id, () => this.set({ layer: id })))),
       Object.assign(document.createElement('span'), { className: 'summary', textContent: summary(a, s, c) }),
+      recenterOpt,
       Object.assign(button('Save run', false, () => this.opts.download(), 'Download this run as JSON'), { className: 'save' }),
     );
 
@@ -229,7 +239,9 @@ export class ReviewView {
     }
     if (!best) { this.popover.hidden = true; return; }
     const base = this.opts.score.getBoundingClientRect();
-    this.showPopover(describe(best.n, this.settings.reference), best.r.left - base.left + best.r.width / 2, best.r.top - base.top);
+    const c = context(this.alignment, this.settings, this.speed);
+    const bias = this.settings.recenter ? { pct: c.timingBiasPct, ms: c.timingBiasMs } : undefined;
+    this.showPopover(describe(best.n, this.settings.reference, bias), best.r.left - base.left + best.r.width / 2, best.r.top - base.top);
   }
 
   private showPopover(text: string, x: number, y: number) {
