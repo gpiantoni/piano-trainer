@@ -164,13 +164,6 @@ export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
       const lh = played.filter((n) => n.expected.staff === 2);
       const parts = [`median ${fmt(played)}`];
       if (rh.length && lh.length) parts.push(`RH ${fmt(rh)}`, `LH ${fmt(lh)}`);
-      const pct = played.map((n) => n.deltaPct!);
-      const iqr = quantile(pct, 0.75) - quantile(pct, 0.25);
-      parts.push(`spread (IQR) ${iqr.toFixed(0)} %`);
-      const r = s.timingRange;
-      const within = (played.filter((n) => Math.abs(n.deltaPct!) <= r).length / played.length) * 100;
-      const ms = s.reference === 'beat' && c.beatMs ? ` (±${Math.round((r / 100) * c.beatMs)} ms)` : '';
-      parts.push(`${within.toFixed(0)} % within ±${r} %${ms}`);
       if (c.beatMs) parts.push(`1 beat = ${Math.round(c.beatMs)} ms`);
       return parts.join(' · ');
     }
