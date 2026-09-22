@@ -166,7 +166,7 @@ function paint() {
   }
   $('progress').textContent = mode !== 'wait' || !practice ? ''
     : practice.done ? `Done · ${practice.wrong} wrong`
-    : `${practice.cursor + 1} / ${practice.chords.length} · ${practice.wrong} wrong`;
+    : `${practice.cursor} / ${practice.chords.length} played · ${practice.wrong} wrong`;
 }
 
 // Bring a line of music to just below the sticky bar. Only when the line
