@@ -87,6 +87,24 @@ test('very late (beyond the window) is a miss plus an extra; a wider window matc
   assert.equal(loose.extras.length, 0);
 });
 
+test('biasMs recentres the match window before it filters: a run\'s own typical lag no longer pushes notes outside it', () => {
+  const s = score(Array(100).fill(60));
+  const lates = [...Array(80).fill(30), ...Array(20).fill(60)];   // ms
+  const rec = s.flatMap((e, i) => [
+    { type: 'on' as const, pitch: e.pitch, velocity: 60, t: e.onMs + lates[i] },
+    { type: 'off' as const, pitch: e.pitch, velocity: 0, t: e.onMs + lates[i] + (e.offMs - e.onMs) * 0.9 },
+  ]);
+  // ±10 % of a 500 ms beat is a ±50 ms window: the +60 ms group falls outside it.
+  const raw = align(s, rec, 1, { maxOffsetBeats: 0.1 });
+  assert.equal(raw.notes.filter((n) => n.status === 'played').length, 80);
+  // Recentred on the run's own +30 ms mean, the window becomes -20..+80 ms:
+  // the +60 ms group is inside it, the +30 ms group still is too.
+  const recentred = align(s, rec, 1, { maxOffsetBeats: 0.1, biasMs: 30 });
+  assert.equal(recentred.notes.filter((n) => n.status === 'played').length, 100);
+  // Reported deltas stay raw, unshifted by the bias.
+  assert.equal(byId(recentred.notes, 'n99').deltaMs, 60);
+});
+
 test('a wrong key a semitone away: missed with wrongPitch, the key listed as extra for it', () => {
   const s = score([60, 64, 67]);
   const rec = perform(s).map((e) => (e.type !== 'pedal' && e.pitch === 64 ? { ...e, pitch: 63 } : e));

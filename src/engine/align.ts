@@ -18,11 +18,15 @@ export type AlignOptions = {
   // section of bars. Alignment still uses the whole timeline, so a key played
   // for a note just outside the section pairs with that note, not with one inside.
   window: { startMs: number; endMs: number };
+  // This run's own mean timing offset (recenter): shifts where the match
+  // window is centred, so a consistent lag or rush doesn't push notes outside
+  // it. Reported deltaMs/deltaPct stay raw, unshifted.
+  biasMs: number;
 };
 
 export const DEFAULT_ALIGN: AlignOptions = {
   maxOffsetBeats: 1, reference: 'beat', hands: 'both', untilMs: Infinity,
-  window: { startMs: -Infinity, endMs: Infinity },
+  window: { startMs: -Infinity, endMs: Infinity }, biasMs: 0,
 };
 
 export type Alignment = { notes: PlayedNote[]; extras: Extra[] };
@@ -62,7 +66,9 @@ export function keyPresses(recording: NoteEvent[]): Press[] {
 
 // Minimum-cost monotone pairing of sorted expected times with sorted press
 // times. Returns, for each expected index, the matched press index or -1.
-function alignPitch(expected: { t: number; beat: number }[], presses: number[], maxOffsetBeats: number): number[] {
+function alignPitch(
+  expected: { t: number; beat: number }[], presses: number[], maxOffsetBeats: number, biasMs: number,
+): number[] {
   const n = expected.length, m = presses.length;
   const skip = maxOffsetBeats;   // a match inside the window always beats miss + extra
   const cost = new Float64Array((n + 1) * (m + 1));
@@ -75,7 +81,8 @@ function alignPitch(expected: { t: number; beat: number }[], presses: number[], 
       let best = cost[at(i - 1, j)] + skip, how = 1;
       if (cost[at(i, j - 1)] + skip < best) { best = cost[at(i, j - 1)] + skip; how = 2; }
       const e = expected[i - 1];
-      const d = Math.abs(presses[j - 1] - e.t) / e.beat;
+      // Window is centred on the recentred expectation, not the raw one.
+      const d = Math.abs(presses[j - 1] - e.t - biasMs) / e.beat;
       if (d <= maxOffsetBeats && cost[at(i - 1, j - 1)] + d <= best) { best = cost[at(i - 1, j - 1)] + d; how = 0; }
       cost[at(i, j)] = best;
       from[at(i, j)] = how;
@@ -111,6 +118,7 @@ export function align(
       exp.map((e) => ({ t: e.onMs / speed, beat: e.beatMs / speed })),
       prs.map((p) => p.on),
       opts.maxOffsetBeats,
+      opts.biasMs,
     );
     match.forEach((j, i) => {
       if (j < 0) return;

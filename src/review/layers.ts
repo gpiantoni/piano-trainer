@@ -68,7 +68,7 @@ const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
 // This run's own mean timing offset, to zero against instead of the score.
 // Needs RECENTER_MIN_NOTES played notes or it's too noisy to trust.
-function timingBias(a: Alignment, s: ReviewSettings): { timingBiasPct: number; timingBiasMs: number } {
+export function timingBias(a: Alignment, s: ReviewSettings): { timingBiasPct: number; timingBiasMs: number } {
   if (!s.recenter) return { timingBiasPct: 0, timingBiasMs: 0 };
   const played = a.notes.filter((n) => n.status === 'played' && n.deltaPct !== undefined);
   if (played.length < RECENTER_MIN_NOTES) return { timingBiasPct: 0, timingBiasMs: 0 };

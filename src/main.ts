@@ -9,6 +9,7 @@ import { TempoRun } from './engine/tempoRun.ts';
 import { align } from './engine/align.ts';
 import { CALIBRATION, estimateLatency } from './engine/calibration.ts';
 import { ReviewView } from './review/view.ts';
+import { timingBias } from './review/layers.ts';
 import type { Hands, NoteEvent } from './types.ts';
 import { getScore, listScores } from './library/db.ts';
 import { LibraryDialog } from './library/dialog.ts';
@@ -441,12 +442,18 @@ function finishRun() {
   scrollToStart();
 }
 
-// Align the last run to the score with the current review settings.
+// Align the last run to the score with the current review settings. With
+// recenter on, a first pass finds this run's own mean timing offset, then a
+// second pass centres the match window on it - so a consistent lag or rush
+// doesn't push notes outside the window and read as missed.
 function analyse() {
   if (!lastRun || !timing) return;
   const { maxOffsetBeats, reference } = review.settings;
   const { recording, speed: runSpeed, untilMs, window } = lastRun;
-  review.show(align(timing.events, recording, runSpeed, { maxOffsetBeats, reference, hands, untilMs, window }), runSpeed);
+  const base = { maxOffsetBeats, reference, hands, untilMs, window };
+  const raw = align(timing.events, recording, runSpeed, base);
+  const { timingBiasMs } = timingBias(raw, review.settings);
+  review.show(timingBiasMs ? align(timing.events, recording, runSpeed, { ...base, biasMs: timingBiasMs }) : raw, runSpeed);
 }
 
 function downloadRun() {

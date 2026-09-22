@@ -90,7 +90,8 @@ export class ReviewView {
 
   private set(patch: Partial<ReviewSettings>) {
     const realign = ('maxOffsetBeats' in patch && patch.maxOffsetBeats !== this.settings.maxOffsetBeats)
-      || ('reference' in patch && patch.reference !== this.settings.reference);
+      || ('reference' in patch && patch.reference !== this.settings.reference)
+      || ('recenter' in patch && patch.recenter !== this.settings.recenter);
     this.settings = { ...this.settings, ...patch };
     this.opts.save(this.settings);
     if (realign) this.opts.realign();
