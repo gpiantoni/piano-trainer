@@ -30,3 +30,4 @@ dist-ssr
 public/scores/*
 !public/scores/.gitkeep
 !public/scores/public-domain/
+runs/
