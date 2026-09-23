@@ -11,6 +11,13 @@ export type Click = {
 
 const LOOKAHEAD_S = 0.12;
 const TICK_MS = 25;
+const BEAT_HZ = 1175;
+const BELL_HZ = BEAT_HZ * 1.5;
+const BELL = [
+  { ratio: 1, amp: 1, decay: 0.35 },
+  { ratio: 2.76, amp: 0.4, decay: 0.15 },
+  { ratio: 5.4, amp: 0.2, decay: 0.08 },
+];
 
 export class Metronome {
   enabled = true;
@@ -20,7 +27,7 @@ export class Metronome {
   private timer: number | undefined;
   private queue: Click[] = [];
   private next = 0;
-  private sources: { osc: OscillatorNode; end: number }[] = [];
+  private sources: { oscs: OscillatorNode[]; end: number }[] = [];
   private toAudio = (ms: number) => ms / 1000;
 
   // Must be called from a user gesture (tap) the first time: autoplay rules.
@@ -42,7 +49,7 @@ export class Metronome {
   stop() {
     clearInterval(this.timer);
     this.timer = undefined;
-    for (const s of this.sources) { try { s.osc.stop(); } catch { /* already stopped */ } }
+    for (const s of this.sources) for (const osc of s.oscs) { try { osc.stop(); } catch { /* already stopped */ } }
     this.sources = [];
     this.queue = [];
   }
@@ -80,13 +87,20 @@ export class Metronome {
     if (this.next >= this.queue.length && this.sources.length === 0) clearInterval(this.timer);
   }
 
+  // Downbeat: a bell, so bar lines stand out by timbre, not just pitch. Beat and
+  // "and" are short ticks a fifth apart (the same interval the bell sits above the
+  // beat), stepping down in pitch and volume with their weight in the bar.
   private click(at: number, accent: boolean, sub = false) {
+    if (accent && !sub) this.bell(at);
+    else this.tick(at, sub ? BEAT_HZ / 1.5 : BEAT_HZ, this.volume * (sub ? 0.45 : 0.6));
+  }
+
+  private tick(at: number, freq: number, peak: number) {
     const ctx = this.ctx!;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'square';
-    osc.frequency.value = sub ? 2600 : accent ? 1760 : 1175;
-    const peak = this.volume * (accent ? 1 : 0.7);
+    osc.frequency.value = freq;
     const decay = 0.05;
     gain.gain.setValueAtTime(0.0001, at);
     gain.gain.exponentialRampToValueAtTime(peak, at + 0.002);
@@ -94,6 +108,32 @@ export class Metronome {
     osc.connect(gain).connect(ctx.destination);
     osc.start(at);
     osc.stop(at + decay + 0.01);
-    this.sources.push({ osc, end: at + decay + 0.01 });
+    this.sources.push({ oscs: [osc], end: at + decay + 0.01 });
+  }
+
+  // Sine partials at inharmonic ratios, as in a small bell; the upper ones die
+  // away faster, which is what makes it ring rather than buzz. The attack is as
+  // sharp as a tick's, so it marks the beat just as precisely.
+  private bell(at: number) {
+    const ctx = this.ctx!;
+    const out = ctx.createGain();
+    out.gain.value = this.volume / BELL.reduce((sum, p) => sum + p.amp, 0);
+    out.connect(ctx.destination);
+    const oscs: OscillatorNode[] = [];
+    let end = at;
+    for (const p of BELL) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = BELL_HZ * p.ratio;
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(p.amp, at + 0.002);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + p.decay);
+      osc.connect(gain).connect(out);
+      osc.start(at);
+      osc.stop(at + p.decay + 0.01);
+      oscs.push(osc);
+      end = Math.max(end, at + p.decay + 0.01);
+    }
+    this.sources.push({ oscs, end });
   }
 }
