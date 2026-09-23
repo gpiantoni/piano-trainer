@@ -33,7 +33,7 @@ export type PlayedNote = {
   wrongPitch?: number;   // missed, and a nearby unmatched key suggests this was meant
   onsetMs?: number;      // key down
   deltaMs?: number;      // onsetMs − expected onset; negative = early
-  deltaPct?: number;     // deltaMs as % of the timing reference (beat or note value)
+  deltaPct?: number;     // deltaMs as % of a beat
   heldMs?: number;       // key down → key up (the finger, not the sound)
   durationPct?: number;  // heldMs as % of the written duration
   velocity?: number;     // 1–127

@@ -20,7 +20,6 @@ export const NOT_MEASURED = '#c4c0bc';
 // symmetric around green: yellow-green (so slightly late is not a muddy olive)
 // is mirrored by teal on the early side.
 export const TIMING_RAMP = ['#313695', '#3b7ec4', '#218f8d', '#1a9850', '#8db500', '#d08c00', '#b2182b'];
-export const TIMING_RANGES = [10, 25, 50, 100, 300];   // ± % at which colour is full
 export const TIMING_LOG_KNEE = 5;                      // % where the log scale turns
 
 // Duration, short → long: amber → deep purple, Inferno reversed and without its
@@ -38,4 +37,6 @@ export const VELOCITY_RAMP = ['#41b6c4', '#1d91c0', '#225ea8', '#253494', '#081d
 
 export const PEDAL_RING = '#0ea5e9';
 
-export const MATCH_WINDOWS = [0.1, 0.25, 0.5, 1];       // × beat
+// × beat, around the (re-centered) score time: how far off a key may be and
+// still count as that note, and where the timing ramp reaches full colour.
+export const MATCH_WINDOWS = [0.1, 0.2, 0.3, 0.4, 0.5];

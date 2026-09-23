@@ -6,10 +6,10 @@ import { listenMidi } from './midi/input.ts';
 import { WaitMode, forHands, noteName, type Feedback } from './engine/waitMode.ts';
 import { Metronome } from './engine/metronome.ts';
 import { TempoRun } from './engine/tempoRun.ts';
-import { align } from './engine/align.ts';
+import { align, runOffset } from './engine/align.ts';
 import { CALIBRATION, estimateLatency } from './engine/calibration.ts';
 import { ReviewView } from './review/view.ts';
-import { timingBias } from './review/layers.ts';
+import { MATCH_WINDOWS } from './review/palettes.ts';
 import type { Hands, NoteEvent } from './types.ts';
 import { getScore, listScores } from './library/db.ts';
 import { LibraryDialog } from './library/dialog.ts';
@@ -442,18 +442,24 @@ function finishRun() {
   scrollToStart();
 }
 
-// Align the last run to the score with the current review settings. With
-// recenter on, a first pass finds this run's own mean timing offset, then a
-// second pass centres the match window on it - so a consistent lag or rush
-// doesn't push notes outside the window and read as missed.
+// Align the last run to the score with the current review settings. First a
+// pass at the widest match window, centred on the score, finds this run's own
+// median timing offset; then, with re-center on, the chosen window is centred
+// on that offset before it decides what counts as played. The offset comes
+// from the run, not from the chosen window.
 function analyse() {
   if (!lastRun || !timing) return;
-  const { maxOffsetBeats, reference } = review.settings;
+  const { maxOffsetBeats, recenter } = review.settings;
   const { recording, speed: runSpeed, untilMs, window } = lastRun;
-  const base = { maxOffsetBeats, reference, hands, untilMs, window };
-  const raw = align(timing.events, recording, runSpeed, base);
-  const { timingBiasMs } = timingBias(raw, review.settings);
-  review.show(timingBiasMs ? align(timing.events, recording, runSpeed, { ...base, biasMs: timingBiasMs }) : raw, runSpeed);
+  const base = { hands, untilMs, window };
+  const widest = Math.max(...MATCH_WINDOWS);
+  const wide = align(timing.events, recording, runSpeed, { ...base, maxOffsetBeats: widest });
+  const offset = runOffset(wide);
+  const biasMs = recenter ? offset.ms ?? 0 : 0;
+  const chosen = biasMs === 0 && maxOffsetBeats === widest
+    ? wide
+    : align(timing.events, recording, runSpeed, { ...base, maxOffsetBeats, biasMs });
+  review.show(chosen, runSpeed, offset);
 }
 
 function downloadRun() {

@@ -1,11 +1,11 @@
-import type { Alignment } from '../engine/align.ts';
+import { OFFSET_MIN_NOTES, type Alignment } from '../engine/align.ts';
 import type { CursorMap } from '../score/cursor.ts';
 import type { PlayedNote } from '../types.ts';
 import {
-  DEFAULT_SETTINGS, RECENTER_MIN_NOTES, colorFor, context, describe, distribution, legend, pitchName, summary,
-  type Layer, type ReviewSettings,
+  DEFAULT_SETTINGS, colorFor, context, describe, distribution, legend, pitchName, summary,
+  type Layer, type Offset, type ReviewSettings,
 } from './layers.ts';
-import { DURATION_RANGES, MATCH_WINDOWS, TIMING_RANGES } from './palettes.ts';
+import { DURATION_RANGES, MATCH_WINDOWS } from './palettes.ts';
 
 // After a tempo run: colour the noteheads by the chosen layer, with a legend
 // strip at the bottom, and show all numbers for a tapped note.
@@ -19,7 +19,7 @@ type Options = {
   strip: HTMLElement;
   load: () => Partial<ReviewSettings>;
   save: (s: ReviewSettings) => void;
-  realign: () => void;           // match window or timing reference changed
+  realign: () => void;           // match window or re-center changed
   download: () => void;
 };
 
@@ -47,6 +47,7 @@ export class ReviewView {
   settings: ReviewSettings;
   alignment: Alignment | undefined;
   private speed = 1;
+  private offset: Offset = { ms: undefined, notes: 0 };
   private noteEls = new Map<string, Element>();
   private cursorMap: CursorMap | undefined;
   private byNoteId = new Map<string, PlayedNote>();
@@ -57,6 +58,8 @@ export class ReviewView {
   constructor(opts: Options) {
     this.opts = opts;
     this.settings = { ...DEFAULT_SETTINGS, ...opts.load() };
+    // Saved from before the current steps: back to the default.
+    if (!MATCH_WINDOWS.includes(this.settings.maxOffsetBeats)) this.settings.maxOffsetBeats = DEFAULT_SETTINGS.maxOffsetBeats;
     opts.score.addEventListener('click', (e) => this.onTap(e));
     document.addEventListener('click', (e) => {
       if (!opts.score.contains(e.target as Node)) this.popover.hidden = true;
@@ -65,9 +68,10 @@ export class ReviewView {
 
   get active() { return !!this.alignment; }
 
-  show(alignment: Alignment, speed: number) {
+  show(alignment: Alignment, speed: number, offset: Offset) {
     this.alignment = alignment;
     this.speed = speed;
+    this.offset = offset;
     this.byNoteId = new Map(alignment.notes.flatMap((n) => [n.expected.id, ...n.expected.tiedIds].map((id) => [id, n])));
     this.render();
   }
@@ -90,7 +94,6 @@ export class ReviewView {
 
   private set(patch: Partial<ReviewSettings>) {
     const realign = ('maxOffsetBeats' in patch && patch.maxOffsetBeats !== this.settings.maxOffsetBeats)
-      || ('reference' in patch && patch.reference !== this.settings.reference)
       || ('recenter' in patch && patch.recenter !== this.settings.recenter);
     this.settings = { ...this.settings, ...patch };
     this.opts.save(this.settings);
@@ -105,7 +108,7 @@ export class ReviewView {
 
   private paint() {
     const a = this.alignment;
-    const c = a && context(a, this.settings, this.speed);
+    const c = a && context(a, this.settings, this.speed, this.offset);
     for (const [id, el] of this.noteEls) {
       const n = this.byNoteId.get(id);
       const on = !!(a && n);
@@ -145,14 +148,13 @@ export class ReviewView {
     document.body.classList.toggle('reviewing', !!a);
     if (!a) { strip.replaceChildren(); return; }
     const s = this.settings;
-    const c = context(a, s, this.speed);
+    const c = context(a, s, this.speed, this.offset);
 
-    const timingPlayed = a.notes.filter((n) => n.status === 'played' && n.deltaPct !== undefined).length;
-    const canRecenter = timingPlayed >= RECENTER_MIN_NOTES;
-    const recenterOpt = segment('', button('Recenter', s.recenter, () => this.set({ recenter: !s.recenter }),
+    const canRecenter = this.offset.ms !== undefined;
+    const recenterOpt = segment('', button('Re-center', s.recenter, () => this.set({ recenter: !s.recenter }),
       canRecenter
-        ? "Shift timing's zero to this run's own mean offset, so a consistent lag or rush reads as on-time"
-        : `Needs ≥ ${RECENTER_MIN_NOTES} timed notes (this run has ${timingPlayed})`));
+        ? "Centre the match window and timing's zero on this run's own median offset, so a consistent lag or rush reads as on time"
+        : `Needs ≥ ${OFFSET_MIN_NOTES} timed notes (this run has ${this.offset.notes})`));
     recenterOpt.classList.add('push-right');
     (recenterOpt.querySelector('button') as HTMLButtonElement).disabled = !canRecenter;
 
@@ -195,12 +197,13 @@ export class ReviewView {
       bottom.append(wrap);
     }
 
+    const matchWindow = segment('match window ±', ...MATCH_WINDOWS.map((w) =>
+      button(`${Math.round(w * 100)} %`, s.maxOffsetBeats === w, () => this.set({ maxOffsetBeats: w }),
+        'How far off a key may be and still count as that note, as % of a beat; also the timing colour range')));
     switch (s.layer) {
       case 'notes':
         bottom.append(
-          segment('match window ±', ...MATCH_WINDOWS.map((w) =>
-            button(`${Math.round(w * 100)} %`, s.maxOffsetBeats === w, () => this.set({ maxOffsetBeats: w }),
-              'How far off a key may be and still count as that note, as % of a beat'))),
+          matchWindow,
           Object.assign(document.createElement('span'), {
             className: 'key-legend',
             innerHTML: '<i class="k played"></i>played <i class="k missed"></i>missed <b class="k-x">×</b> extra key',
@@ -209,10 +212,8 @@ export class ReviewView {
         break;
       case 'timing':
         bottom.append(
-          segment('range ±', ...TIMING_RANGES.map((r) => button(`${r}`, s.timingRange === r, () => this.set({ timingRange: r })))),
+          matchWindow,
           segment('', button('log', s.timingLog, () => this.set({ timingLog: !s.timingLog }), 'Logarithmic: small and large offsets both visible')),
-          segment('% of', button('beat', s.reference === 'beat', () => this.set({ reference: 'beat' })),
-            button('note', s.reference === 'note', () => this.set({ reference: 'note' }))),
         );
         break;
       case 'duration':
@@ -240,9 +241,8 @@ export class ReviewView {
     }
     if (!best) { this.popover.hidden = true; return; }
     const base = this.opts.score.getBoundingClientRect();
-    const c = context(this.alignment, this.settings, this.speed);
-    const bias = this.settings.recenter ? { pct: c.timingBiasPct, ms: c.timingBiasMs } : undefined;
-    this.showPopover(describe(best.n, this.settings.reference, bias), best.r.left - base.left + best.r.width / 2, best.r.top - base.top);
+    const c = context(this.alignment, this.settings, this.speed, this.offset);
+    this.showPopover(describe(best.n, c), best.r.left - base.left + best.r.width / 2, best.r.top - base.top);
   }
 
   private showPopover(text: string, x: number, y: number) {

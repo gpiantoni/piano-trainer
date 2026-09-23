@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { align, keyPresses } from '../src/engine/align.ts';
+import { OFFSET_MIN_NOTES, align, keyPresses, runOffset } from '../src/engine/align.ts';
 import { estimateLatency } from '../src/engine/calibration.ts';
 import type { ExpectedEvent, NoteEvent, Staff } from '../src/types.ts';
 
@@ -45,12 +45,10 @@ test('late playing reads as positive % of a beat', () => {
   assert.equal(notes[0].deltaPct, 20);
 });
 
-test('early playing reads as negative; note-value reference doubles % for eighths', () => {
+test('early playing reads as negative % of a beat, whatever the note value', () => {
   const s = score([60, 62], 1, 'n', BEAT / 2);   // eighth notes on each beat
-  const beat = align(s, perform(s, { late: -50 }), 1);
-  const note = align(s, perform(s, { late: -50 }), 1, { reference: 'note' });
-  assert.equal(beat.notes[0].deltaPct, -10);
-  assert.equal(note.notes[0].deltaPct, -20);
+  const { notes } = align(s, perform(s, { late: -50 }), 1);
+  assert.equal(notes[0].deltaPct, -10);
 });
 
 test('practice speed: deltas are in real ms and % of the slowed beat', () => {
@@ -87,7 +85,7 @@ test('very late (beyond the window) is a miss plus an extra; a wider window matc
   assert.equal(loose.extras.length, 0);
 });
 
-test('biasMs recentres the match window before it filters: a run\'s own typical lag no longer pushes notes outside it', () => {
+test('biasMs re-centers the match window before it filters: a run\'s own typical lag no longer pushes notes outside it', () => {
   const s = score(Array(100).fill(60));
   const lates = [...Array(80).fill(30), ...Array(20).fill(60)];   // ms
   const rec = s.flatMap((e, i) => [
@@ -103,6 +101,40 @@ test('biasMs recentres the match window before it filters: a run\'s own typical 
   assert.equal(recentred.notes.filter((n) => n.status === 'played').length, 100);
   // Reported deltas stay raw, unshifted by the bias.
   assert.equal(byId(recentred.notes, 'n99').deltaMs, 60);
+});
+
+test('runOffset: the median over a wide pass, so the offset belongs to the run, not to the chosen window', () => {
+  const s = score(Array(100).fill(60));
+  // Most notes 80 ms late, a few far off: the median ignores the far ones.
+  const lates = [...Array(90).fill(80), ...Array(10).fill(-200)];
+  const rec = s.flatMap((e, i) => [
+    { type: 'on' as const, pitch: e.pitch, velocity: 60, t: e.onMs + lates[i] },
+    { type: 'off' as const, pitch: e.pitch, velocity: 0, t: e.onMs + lates[i] + 400 },
+  ]);
+  // ±50 % of a 500 ms beat: everything pairs, median +80 ms.
+  assert.deepEqual(runOffset(align(s, rec, 1, { maxOffsetBeats: 0.5 })), { ms: 80, notes: 100 });
+  // Measured after a ±10 % window instead, +80 ms is already cut away: nothing
+  // left to measure. Hence the wide pass first.
+  assert.equal(runOffset(align(s, rec, 1, { maxOffsetBeats: 0.1 })).ms, undefined);
+  // Centred on +80 ms, the ±10 % window keeps the 90 close ones.
+  const centred = align(s, rec, 1, { maxOffsetBeats: 0.1, biasMs: 80 });
+  assert.equal(centred.notes.filter((n) => n.status === 'played').length, 90);
+});
+
+test(`runOffset needs ${OFFSET_MIN_NOTES} timed notes`, () => {
+  const s = score(Array(OFFSET_MIN_NOTES - 1).fill(60));
+  assert.deepEqual(runOffset(align(s, perform(s, { late: 30 }), 1)), { ms: undefined, notes: OFFSET_MIN_NOTES - 1 });
+});
+
+test('a re-centered window also finds the wrong key for a missed note around the shifted time', () => {
+  const s = score([60, 64, 67]);
+  // Every key 90 ms late; the middle one a semitone off.
+  const rec = perform(s, { late: 90 }).map((e) => (e.type !== 'pedal' && e.pitch === 64 ? { ...e, pitch: 63 } : e));
+  const raw = align(s, rec, 1, { maxOffsetBeats: 0.1 });
+  assert.equal(byId(raw.notes, 'n1').wrongPitch, undefined);
+  const centred = align(s, rec, 1, { maxOffsetBeats: 0.1, biasMs: 90 });
+  assert.equal(byId(centred.notes, 'n1').wrongPitch, 63);
+  assert.equal(byId(centred.notes, 'n0').status, 'played');
 });
 
 test('a wrong key a semitone away: missed with wrongPitch, the key listed as extra for it', () => {

@@ -7,25 +7,22 @@ import type { ExpectedEvent, Extra, Hands, NoteEvent, PlayedNote } from '../type
 // is aligned separately with a small edit-distance programme. Looking at the
 // whole run at once means a very late key still pairs with the right note.
 
-export type TimingReference = 'beat' | 'note';
-
 export type AlignOptions = {
   maxOffsetBeats: number;       // beyond this a key is not that note: missed + extra
-  reference: TimingReference;   // what deltaPct is a percentage of
   hands: Hands;                 // notes of the other hand are aligned but not reported
   untilMs: number;              // run stopped here (real ms from t0): later notes are not reported
   // Only notes starting in [startMs, endMs) (score ms at 1.0×) are reported: a
   // section of bars. Alignment still uses the whole timeline, so a key played
   // for a note just outside the section pairs with that note, not with one inside.
   window: { startMs: number; endMs: number };
-  // This run's own mean timing offset (recenter): shifts where the match
+  // This run's own typical timing offset (re-center): shifts where the match
   // window is centred, so a consistent lag or rush doesn't push notes outside
   // it. Reported deltaMs/deltaPct stay raw, unshifted.
   biasMs: number;
 };
 
 export const DEFAULT_ALIGN: AlignOptions = {
-  maxOffsetBeats: 1, reference: 'beat', hands: 'both', untilMs: Infinity,
+  maxOffsetBeats: 1, hands: 'both', untilMs: Infinity,
   window: { startMs: -Infinity, endMs: Infinity }, biasMs: 0,
 };
 
@@ -81,7 +78,7 @@ function alignPitch(
       let best = cost[at(i - 1, j)] + skip, how = 1;
       if (cost[at(i, j - 1)] + skip < best) { best = cost[at(i, j - 1)] + skip; how = 2; }
       const e = expected[i - 1];
-      // Window is centred on the recentred expectation, not the raw one.
+      // Window is centred on the re-centered expectation, not the raw one.
       const d = Math.abs(presses[j - 1] - e.t - biasMs) / e.beat;
       if (d <= maxOffsetBeats && cost[at(i - 1, j - 1)] + d <= best) { best = cost[at(i - 1, j - 1)] + d; how = 0; }
       cost[at(i, j)] = best;
@@ -137,7 +134,6 @@ export function align(
     const at = expected.onMs / speed;
     const beat = expected.beatMs / speed;
     const written = (expected.offMs - expected.onMs) / speed;
-    const reference = opts.reference === 'note' && written > 0 ? written : beat;
     const deltaMs = press.on - at;
     const heldMs = press.off === undefined ? undefined : press.off - press.on;
     return {
@@ -145,7 +141,7 @@ export function align(
       status: 'played',
       onsetMs: press.on,
       deltaMs,
-      deltaPct: (deltaMs / reference) * 100,
+      deltaPct: (deltaMs / beat) * 100,
       heldMs,
       durationPct: heldMs === undefined || written <= 0 ? undefined : (heldMs / written) * 100,
       velocity: press.velocity,
@@ -157,15 +153,16 @@ export function align(
   // Unmatched keys count as extras only around the section: not during the
   // count-in, nor after its end. One match window of slack on each side.
   const slack = (opts.maxOffsetBeats * (notes[0]?.expected.beatMs ?? 0)) / speed;
+  const from = startMs / speed + opts.biasMs - slack, to = endMs / speed + opts.biasMs + slack;
   const extras: Extra[] = presses
-    .filter((p) => !used.has(p) && p.on >= startMs / speed - slack && p.on < endMs / speed + slack)
+    .filter((p) => !used.has(p) && p.on >= from && p.on < to)
     .map((p) => ({ pitch: p.pitch, onsetMs: p.on, velocity: p.velocity }));
 
   // A missed note with an unmatched key a semitone or two away, in its window:
   // most likely that key was meant for it.
   for (const note of notes) {
     if (note.status !== 'missed') continue;
-    const at = note.expected.onMs / speed, window = (opts.maxOffsetBeats * note.expected.beatMs) / speed;
+    const at = note.expected.onMs / speed + opts.biasMs, window = (opts.maxOffsetBeats * note.expected.beatMs) / speed;
     let best: Extra | undefined;
     for (const x of extras) {
       if (x.wrongFor || Math.abs(x.pitch - note.expected.pitch) > 2 || Math.abs(x.onsetMs - at) > window) continue;
@@ -178,4 +175,18 @@ export function align(
   }
 
   return { notes, extras };
+}
+
+// Below this many timed notes, a run's typical offset is too noisy to zero against.
+export const OFFSET_MIN_NOTES = 50;
+
+// This run's own typical timing offset: the median deltaMs of the notes an
+// alignment centred on the score found. Call it with the widest match window,
+// so the offset belongs to the run, not to the window chosen for review.
+// ms is undefined below OFFSET_MIN_NOTES timed notes.
+export function runOffset(a: Alignment): { ms: number | undefined; notes: number } {
+  const deltas = a.notes.flatMap((n) => (n.deltaMs === undefined ? [] : [n.deltaMs])).sort((x, y) => x - y);
+  const k = deltas.length;
+  if (k < OFFSET_MIN_NOTES) return { ms: undefined, notes: k };
+  return { ms: k % 2 ? deltas[(k - 1) / 2] : (deltas[k / 2 - 1] + deltas[k / 2]) / 2, notes: k };
 }
