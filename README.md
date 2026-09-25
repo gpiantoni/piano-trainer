@@ -76,6 +76,27 @@ quirk. Firefox desktop does support Web MIDI since 108, but only on `localhost`
 unless you install its per-site permission add-on, so it is usable for local
 development and not for the deployed build.
 
+## Exporting from MuseScore
+
+```bash
+scripts/export.sh "path/to/Song Name"   # .mscz extension optional
+```
+
+writes `Song Name.pdf`, `.mid` and `.musicxml` into `export/` next to the score
+(the folder to link in **Library**), and prints the title, composer and tempo
+(`scripts/mscz_info.py`). Needs `mscore` (MuseScore 4) and `python3`. With a
+symlink in the score folder, `./export.sh "Song Name"` works there:
+
+```bash
+ln -s ~/Documents/piano-trainer/scripts/export.sh ~/Documents/MuseScore4/Scores/
+```
+
+The MusicXML has its **repeats unrolled** (`mscore --unroll-repeats`): voltas,
+D.C., D.S. and codas are written out in playing order, so bar numbers run past
+the printed ones. Verovio would play the repeats of a written-out score too, but
+gives the second pass note ids it never draws, so the cursor and the review
+colours have nothing to land on. The PDF and MIDI keep the repeats as written.
+
 ## Stack
 
 - Vite + TypeScript, vanilla DOM
