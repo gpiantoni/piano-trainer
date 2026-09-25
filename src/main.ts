@@ -453,12 +453,12 @@ function analyse() {
   const { recording, speed: runSpeed, untilMs, window } = lastRun;
   const base = { hands, untilMs, window };
   const widest = Math.max(...MATCH_WINDOWS);
-  const wide = align(timing.events, recording, runSpeed, { ...base, maxOffsetBeats: widest });
+  const wide = align(timing.events, recording, runSpeed, { ...base, maxOffsetBeats: widest }, timing.pedals);
   const offset = runOffset(wide);
   const biasMs = recenter ? offset.ms ?? 0 : 0;
   const chosen = biasMs === 0 && maxOffsetBeats === widest
     ? wide
-    : align(timing.events, recording, runSpeed, { ...base, maxOffsetBeats, biasMs });
+    : align(timing.events, recording, runSpeed, { ...base, maxOffsetBeats, biasMs }, timing.pedals);
   review.show(chosen, runSpeed, offset);
 }
 

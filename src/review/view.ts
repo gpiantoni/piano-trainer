@@ -1,8 +1,8 @@
 import { OFFSET_MIN_NOTES, type Alignment } from '../engine/align.ts';
 import type { CursorMap } from '../score/cursor.ts';
-import type { PlayedNote } from '../types.ts';
+import type { PlayedNote, PlayedPedal } from '../types.ts';
 import {
-  DEFAULT_SETTINGS, colorFor, context, describe, distribution, legend, pitchName, summary,
+  DEFAULT_SETTINGS, colorFor, context, describe, describePedal, distribution, legend, pedalColor, pitchName, summary,
   type Layer, type Offset, type ReviewSettings,
 } from './layers.ts';
 import { DURATION_RANGES, MATCH_WINDOWS } from './palettes.ts';
@@ -12,7 +12,9 @@ import { DURATION_RANGES, MATCH_WINDOWS } from './palettes.ts';
 
 const TAP_REACH_PX = 28;
 
-const LAYERS: [Layer, string][] = [['notes', 'Notes'], ['timing', 'Timing'], ['duration', 'Duration'], ['velocity', 'Velocity']];
+const LAYERS: [Layer, string][] = [
+  ['notes', 'Notes'], ['timing', 'Timing'], ['duration', 'Duration'], ['velocity', 'Velocity'], ['pedal', 'Pedal'],
+];
 
 type Options = {
   score: HTMLElement;
@@ -51,6 +53,8 @@ export class ReviewView {
   private noteEls = new Map<string, Element>();
   private cursorMap: CursorMap | undefined;
   private byNoteId = new Map<string, PlayedNote>();
+  private pedalEls = new Map<string, Element>();
+  private byPedalId = new Map<string, PlayedPedal[]>();
   private markers: HTMLElement[] = [];
   private popover = Object.assign(document.createElement('div'), { className: 'popover', hidden: true });
   private opts: Options;
@@ -73,12 +77,15 @@ export class ReviewView {
     this.speed = speed;
     this.offset = offset;
     this.byNoteId = new Map(alignment.notes.flatMap((n) => [n.expected.id, ...n.expected.tiedIds].map((id) => [id, n])));
+    this.byPedalId = new Map();
+    for (const p of alignment.pedals) this.byPedalId.set(p.mark.id, [...this.byPedalId.get(p.mark.id) ?? [], p]);
     this.render();
   }
 
   clear() {
     this.alignment = undefined;
     this.byNoteId.clear();
+    this.byPedalId.clear();
     this.popover.hidden = true;
     this.render();
   }
@@ -86,6 +93,7 @@ export class ReviewView {
   // After every re-layout: new SVG elements, new positions.
   attach(noteEls: Map<string, Element>, cursorMap: CursorMap | undefined) {
     this.noteEls = noteEls;
+    this.pedalEls = new Map([...this.opts.score.querySelectorAll('g.pedal')].map((el) => [el.id, el]));
     this.cursorMap = cursorMap;
     this.opts.score.append(this.popover);
     this.popover.hidden = true;
@@ -106,39 +114,71 @@ export class ReviewView {
     this.renderStrip();
   }
 
+  // The Pedal layer only exists where the score has pedal signs; a saved
+  // choice of it shows the Notes layer elsewhere, without being forgotten.
+  private get hasPedal() { return !!this.alignment?.pedals.length; }
+  private get shown(): ReviewSettings {
+    return this.settings.layer === 'pedal' && !this.hasPedal ? { ...this.settings, layer: 'notes' } : this.settings;
+  }
+
   private paint() {
     const a = this.alignment;
-    const c = a && context(a, this.settings, this.speed, this.offset);
+    const s = this.shown;
+    const c = a && context(a, s, this.speed, this.offset);
     for (const [id, el] of this.noteEls) {
       const n = this.byNoteId.get(id);
-      const on = !!(a && n);
+      // Pedal: the signs carry the colour, the notes stay black.
+      const on = !!(a && n) && s.layer !== 'pedal';
       el.classList.toggle('review', on);
       // Reviewing, but not in this run's report: after an early Stop.
       el.classList.toggle('unreviewed', !!a && !n);
-      el.classList.toggle('pedal', on && this.settings.layer === 'duration' && !!n!.pedal);
-      if (on) (el as HTMLElement).style.setProperty('--note', colorFor(n!, this.settings, c!));
+      el.classList.toggle('pedal', on && s.layer === 'duration' && !!n!.pedal);
+      if (on) (el as HTMLElement).style.setProperty('--note', colorFor(n!, s, c!));
+      else (el as HTMLElement).style.removeProperty('--note');
+    }
+    for (const [id, el] of this.pedalEls) {
+      const ps = this.byPedalId.get(id);
+      const on = !!(a && ps) && s.layer === 'pedal';
+      el.classList.toggle('review', on);
+      // A change sign: coloured by the pedal going down again.
+      if (on) (el as HTMLElement).style.setProperty('--note', pedalColor(ps!.at(-1)!, s, c!));
       else (el as HTMLElement).style.removeProperty('--note');
     }
 
     for (const m of this.markers) m.remove();
     this.markers = [];
-    if (!a || this.settings.layer !== 'notes' || !this.cursorMap) return;
+    if (!a || !this.cursorMap) return;
+    if (s.layer === 'pedal') {
+      for (const x of a.pedalExtras) {
+        const pos = this.cursorMap.position(Math.max(0, x.atMs * this.speed));
+        if (!pos) continue;
+        const what = `extra pedal ${x.down ? 'down' : 'up'}`;
+        this.addMarker(what, `${what} · not in the score`, pos.x, pos.bottom, 'below');
+      }
+      return;
+    }
+    if (s.layer !== 'notes') return;
     for (const x of a.extras) {
       if (x.wrongFor) continue;
       const pos = this.cursorMap.position(Math.max(0, x.onsetMs * this.speed));
       if (!pos) continue;
-      const m = document.createElement('button');
-      m.className = 'extra';
-      m.textContent = '×';
-      m.title = `extra ${pitchName(x.pitch)}`;
-      m.style.transform = `translate(${pos.x}px, ${pos.top}px)`;
-      m.onclick = (e) => {
-        e.stopPropagation();
-        this.showPopover(`${pitchName(x.pitch)} · not in the score · vel ${x.velocity}`, pos.x, pos.top);
-      };
-      this.opts.score.append(m);
-      this.markers.push(m);
+      this.addMarker(`extra ${pitchName(x.pitch)}`, `${pitchName(x.pitch)} · not in the score · vel ${x.velocity}`, pos.x, pos.top);
     }
+  }
+
+  // A red × on the score: above the staves for a key, below for the pedal.
+  private addMarker(title: string, text: string, x: number, y: number, extra = '') {
+    const m = document.createElement('button');
+    m.className = `extra ${extra}`.trim();
+    m.textContent = '×';
+    m.title = title;
+    m.style.transform = `translate(${x}px, ${y}px)`;
+    m.onclick = (e) => {
+      e.stopPropagation();
+      this.showPopover(text, x, y);
+    };
+    this.opts.score.append(m);
+    this.markers.push(m);
   }
 
   private renderStrip() {
@@ -147,7 +187,7 @@ export class ReviewView {
     strip.hidden = !a;
     document.body.classList.toggle('reviewing', !!a);
     if (!a) { strip.replaceChildren(); return; }
-    const s = this.settings;
+    const s = this.shown;
     const c = context(a, s, this.speed, this.offset);
 
     const canRecenter = this.offset.ms !== undefined;
@@ -161,7 +201,8 @@ export class ReviewView {
     const top = document.createElement('div');
     top.className = 'strip-row';
     top.append(
-      segment('', ...LAYERS.map(([id, label]) => button(label, s.layer === id, () => this.set({ layer: id })))),
+      segment('', ...LAYERS.filter(([id]) => id !== 'pedal' || this.hasPedal)
+        .map(([id, label]) => button(label, s.layer === id, () => this.set({ layer: id })))),
       Object.assign(document.createElement('span'), { className: 'summary', textContent: summary(a, s, c) }),
       recenterOpt,
       Object.assign(button('Save run', false, () => this.opts.download(), 'Download this run as JSON'), { className: 'save' }),
@@ -175,14 +216,17 @@ export class ReviewView {
       wrap.className = 'ramp-wrap';
       wrap.classList.toggle('tall', lg.ticks.some((t) => t.label.includes('\n')));
 
-      const dist = document.createElement('div');
-      dist.className = 'dist';
-      for (const x of distribution(a, s, c)) {
-        const tick = document.createElement('i');
-        tick.style.left = `${x * 100}%`;
-        dist.append(tick);
+      for (const row of distribution(a, s, c)) {
+        const dist = document.createElement('div');
+        dist.className = 'dist';
+        if (row.label) dist.dataset.label = row.label;
+        for (const x of row.xs) {
+          const tick = document.createElement('i');
+          tick.style.left = `${x * 100}%`;
+          dist.append(tick);
+        }
+        wrap.append(dist);
       }
-      wrap.append(dist);
 
       const bar = document.createElement('div');
       bar.className = 'ramp';
@@ -210,6 +254,11 @@ export class ReviewView {
           }),
         );
         break;
+      case 'pedal':
+        bottom.append(matchWindow, Object.assign(document.createElement('span'), {
+          className: 'key-legend', innerHTML: '<i class="k unmoved"></i>pedal didn\'t move <b class="k-x">×</b> extra change',
+        }));
+        break;
       case 'timing':
         bottom.append(
           matchWindow,
@@ -229,20 +278,32 @@ export class ReviewView {
   }
 
   // Fingers are wider than noteheads: take the nearest notehead within reach.
+  // In the Pedal layer, the pedal signs instead of the notes.
   private onTap(e: MouseEvent) {
     if (!this.alignment) return;
-    let best: { n: PlayedNote; r: DOMRect; d: number } | undefined;
-    for (const [id, el] of this.noteEls) {
-      const n = this.byNoteId.get(id);
-      if (!n) continue;
+    const c = context(this.alignment, this.shown, this.speed, this.offset);
+    const pedal = this.shown.layer === 'pedal';
+    let best: { text: () => string; r: DOMRect; d: number } | undefined;
+    const consider = (el: Element, text: () => string) => {
       const r = (el.querySelector('.notehead') ?? el).getBoundingClientRect();
       const d = Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
-      if (d < TAP_REACH_PX && (!best || d < best.d)) best = { n, r, d };
+      if (d < TAP_REACH_PX && (!best || d < best.d)) best = { text, r, d };
+    };
+    if (pedal) {
+      for (const [id, el] of this.pedalEls) {
+        const ps = this.byPedalId.get(id);
+        if (ps) consider(el, () => describePedal(ps, c));
+      }
+    } else {
+      for (const [id, el] of this.noteEls) {
+        const n = this.byNoteId.get(id);
+        if (n) consider(el, () => describe(n, c));
+      }
     }
     if (!best) { this.popover.hidden = true; return; }
+    const { text, r } = best;
     const base = this.opts.score.getBoundingClientRect();
-    const c = context(this.alignment, this.settings, this.speed, this.offset);
-    this.showPopover(describe(best.n, c), best.r.left - base.left + best.r.width / 2, best.r.top - base.top);
+    this.showPopover(text(), r.left - base.left + r.width / 2, r.top - base.top);
   }
 
   private showPopover(text: string, x: number, y: number) {

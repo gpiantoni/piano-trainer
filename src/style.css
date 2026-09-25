@@ -100,8 +100,11 @@ g.note.wrong, g.note.wrong * { fill: var(--wrong); color: var(--wrong); }
 g.note.review, g.note.review * { fill: var(--note); color: var(--note); }
 g.note.unreviewed, g.note.unreviewed * { fill: var(--muted-note); color: var(--muted-note); }
 g.note.review.pedal > .notehead use { stroke: var(--pedal); stroke-width: 70px; paint-order: stroke; }
+/* Pedal layer: the Ped. and * signs, thickened so their colour reads. */
+g.pedal.review, g.pedal.review * { fill: var(--note); color: var(--note); }
+g.pedal.review use { stroke: var(--note); stroke-width: 40px; }
 
-body.reviewing { padding-bottom: 8.5rem; }
+body.reviewing { padding-bottom: 9.5rem; }
 
 .strip {
   position: fixed;
@@ -150,6 +153,17 @@ body.reviewing { padding-bottom: 8.5rem; }
   margin-bottom: .15rem;
   pointer-events: none;
 }
+/* Split into rows (RH / LH, Ped / *): each labelled in the margin. */
+.dist[data-label]::before {
+  content: attr(data-label);
+  position: absolute;
+  right: calc(100% + .35rem);
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: .7rem;
+  line-height: 1;
+  color: var(--muted);
+}
 .dist i {
   position: absolute;
   top: 0;
@@ -175,6 +189,7 @@ body.reviewing { padding-bottom: 8.5rem; }
 .k.played { background: #16a34a; }
 .k.missed { background: #dc2626; }
 .k.ring { border: 3px solid var(--pedal); }
+.k.unmoved { background: var(--muted-note); }
 .k-x { color: #dc2626; font-size: 1.1rem; margin-left: .4rem; }
 
 .extra {
@@ -190,6 +205,7 @@ body.reviewing { padding-bottom: 8.5rem; }
   font: 700 1.3rem/1 system-ui, sans-serif;
   cursor: pointer;
 }
+.extra.below { top: .3rem; }
 
 .popover {
   position: absolute;

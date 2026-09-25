@@ -19,7 +19,7 @@ function timing(): ScoreTiming {
     id: `n${k}`, tiedIds: [], pitch: 60 + k, onMs: b.t, offMs: b.t + BEAT, staff: 1, beatMs: BEAT, measure: b.measure,
   }));
   return {
-    events, measures, beats, subdivisions: [], onsets: [], bpm: 120, endMs: 4 * BAR,
+    events, measures, beats, subdivisions: [], onsets: [], pedals: [], bpm: 120, endMs: 4 * BAR,
     countIn: [-3, -2, -1].map((k) => ({ t: k * BEAT, accent: k === -3 })),
   };
 }

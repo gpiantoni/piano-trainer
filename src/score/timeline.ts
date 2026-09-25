@@ -1,7 +1,7 @@
 import type { VerovioToolkit } from 'verovio/esm';
-import type { ExpectedEvent, Staff } from '../types.ts';
+import type { ExpectedEvent, PedalMark, Staff } from '../types.ts';
 import {
-  buildBeats, buildMeasures, buildSubdivisions, countIn, lastAtOrBefore, measureNumbers, metersByMeasure,
+  buildBeats, buildMeasures, buildSubdivisions, countIn, lastAtOrBefore, measureNumbers, metersByMeasure, qToMs,
   type Beat, type Measure, type TimemapEntry,
 } from './beats.ts';
 
@@ -13,6 +13,7 @@ export type ScoreTiming = {
   subdivisions: number[];                     // "and" ticks halfway between beats
   countIn: { t: number; accent: boolean; sub?: boolean }[];   // before score time 0, 1.0× ms
   onsets: { t: number; ids: string[] }[];     // notes and rests starting together: cursor anchors
+  pedals: PedalMark[];                        // in time order; up before down at the same time
   bpm: number;                                // quarter-note tempo at the start
   endMs: number;
 };
@@ -55,6 +56,61 @@ function staffLinks(mei: string): Map<string, Staff> {
     }
   }
   return links;
+}
+
+type PedalSign = { id: string; down: boolean; tstamp?: number; startid?: string };
+
+// measure id -> its pedal signs. Verovio's MusicXML import writes
+// <pedal dir="down|up|bounce" tstamp>; other MEI may anchor a sign to a note
+// (startid), or give a down its release as tstamp2="<bars>m+<beat>".
+function pedalSigns(mei: string): Map<string, PedalSign[]> {
+  const out = new Map<string, PedalSign[]>();
+  const order: string[] = [];
+  const add = (measure: string | undefined, sign: PedalSign) => {
+    if (!measure) return;
+    if (!out.has(measure)) out.set(measure, []);
+    out.get(measure)!.push(sign);
+  };
+  const later: { from: number; bars: number; sign: PedalSign }[] = [];
+  for (const [tag, name] of mei.matchAll(/<(measure|pedal)\b[^>]*>/g)) {
+    const attr = (a: string) => tag.match(new RegExp(`\\s${a}="([^"]+)"`))?.[1];
+    if (name === 'measure') { const id = attr('xml:id'); if (id) order.push(id); continue; }
+    const id = attr('xml:id'), dir = attr('dir');
+    if (!id || !dir) continue;
+    const tstamp = Number(attr('tstamp')) || undefined;
+    const startid = attr('startid')?.replace(/^#/, '');
+    if (dir === 'up' || dir === 'bounce') add(order.at(-1), { id, down: false, tstamp, startid });
+    if (dir === 'down' || dir === 'bounce') add(order.at(-1), { id, down: true, tstamp, startid });
+    const end = attr('tstamp2')?.match(/^(\d+)m\+([\d.]+)$/);
+    if (dir === 'down' && end) later.push({ from: order.length - 1, bars: Number(end[1]), sign: { id, down: false, tstamp: Number(end[2]) } });
+  }
+  for (const { from, bars, sign } of later) add(order[from + bars], sign);
+  return out;
+}
+
+// Pedal signs at score times, in performance order: a repeated bar repeats its
+// signs. A tstamp of the bar's last beat + .9 is verovio's "at the barline".
+function pedalMarks(
+  mei: string, measures: Measure[], map: TimemapEntry[], onAt: Map<string, number>, beatMsAt: (t: number) => number,
+): PedalMark[] {
+  const signs = pedalSigns(mei);
+  const toMs = qToMs(map);
+  const firstStart = new Map<string, number>();
+  for (const m of measures) if (!firstStart.has(m.id)) firstStart.set(m.id, m.startMs);
+  const marks: PedalMark[] = [];
+  for (const m of measures) {
+    for (const s of signs.get(m.id) ?? []) {
+      let t: number | undefined;
+      if (s.tstamp !== undefined) {
+        const q = s.tstamp >= m.meter.count + 0.9 - 1e-6 ? m.endQ : m.startQ + (s.tstamp - 1) * (4 / m.meter.unit);
+        t = toMs(Math.min(q, m.endQ));
+      } else if (s.startid && onAt.has(s.startid)) {
+        t = m.startMs + onAt.get(s.startid)! - firstStart.get(m.id)!;
+      }
+      if (t !== undefined) marks.push({ id: s.id, down: s.down, t, beatMs: beatMsAt(t) });
+    }
+  }
+  return marks.sort((a, b) => a.t - b.t || Number(a.down) - Number(b.down));
 }
 
 // Requires a score already loaded into `tk`. Note ids are regenerated on every
@@ -103,10 +159,13 @@ export function buildTimeline(tk: VerovioToolkit): ScoreTiming {
   const measures = buildMeasures(map, metersByMeasure(mei), measureNumbers(mei));
   const beats = buildBeats(measures, map);
   const sorted = [...events.values()].sort((a, b) => a.onMs - b.onMs || a.pitch - b.pitch);
-  for (const ev of sorted) {
-    const i = Math.max(0, lastAtOrBefore(beats, ev.onMs, (b) => b.t));
+  const beatMsAt = (t: number) => {
+    const i = Math.max(0, lastAtOrBefore(beats, t, (b) => b.t));
     const next = beats[i + 1]?.t ?? (beats[i] && beats[i - 1] ? 2 * beats[i].t - beats[i - 1].t : NaN);
-    ev.beatMs = beats[i] && next > beats[i].t ? next - beats[i].t : 60000 / (map[0]?.tempo ?? 120);
+    return beats[i] && next > beats[i].t ? next - beats[i].t : 60000 / (map[0]?.tempo ?? 120);
+  };
+  for (const ev of sorted) {
+    ev.beatMs = beatMsAt(ev.onMs);
     ev.measure = Math.max(0, lastAtOrBefore(measures, ev.onMs, (m) => m.startMs));
   }
 
@@ -121,6 +180,7 @@ export function buildTimeline(tk: VerovioToolkit): ScoreTiming {
     subdivisions: buildSubdivisions(measures, map),
     countIn: countIn(measures, beats, map),
     onsets,
+    pedals: pedalMarks(mei, measures, map, onAt, beatMsAt),
     bpm: map.find((e) => e.tempo)?.tempo ?? 120,
     endMs: Math.max(measures.at(-1)?.endMs ?? 0, ...sorted.map((e) => e.offMs)),
   };

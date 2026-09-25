@@ -1,5 +1,5 @@
 import { OFFSET_MIN_NOTES, type Alignment } from '../engine/align.ts';
-import type { PlayedNote } from '../types.ts';
+import type { PlayedNote, PlayedPedal } from '../types.ts';
 import {
   DURATION_RAMP, NOTES, NOT_MEASURED, TIMING_LOG_KNEE, TIMING_RAMP, VELOCITY_RAMP,
 } from './palettes.ts';
@@ -7,7 +7,7 @@ import {
 // PlayedNote -> colour, legend and one-line summary, per review layer.
 // Measurements, not judgements: no layer but "notes" has a good colour.
 
-export type Layer = 'notes' | 'timing' | 'duration' | 'velocity';
+export type Layer = 'notes' | 'timing' | 'duration' | 'velocity' | 'pedal';
 
 export type ReviewSettings = {
   layer: Layer;
@@ -79,11 +79,13 @@ export function context(a: Alignment, s: ReviewSettings, speed: number, offset: 
   return { velocityLo, velocityHi, speed, beatMs, offset, biasMs };
 }
 
-// A played note's timing from the (re-centered) zero: ms, and % of its beat.
-function timing(n: PlayedNote, c: Context): { ms: number; pct: number } {
-  const ms = n.deltaMs! - c.biasMs;
-  return { ms, pct: (ms / (n.expected.beatMs / c.speed)) * 100 };
+// A timing offset from the (re-centered) zero: ms, and % of its beat.
+function timingOf(deltaMs: number, beatMs: number, c: Context): { ms: number; pct: number } {
+  const ms = deltaMs - c.biasMs;
+  return { ms, pct: (ms / (beatMs / c.speed)) * 100 };
 }
+const timing = (n: PlayedNote, c: Context) => timingOf(n.deltaMs!, n.expected.beatMs, c);
+const pedalTiming = (p: PlayedPedal, c: Context) => timingOf(p.deltaMs!, p.mark.beatMs, c);
 
 // Where a played note sits on the current layer's [0, 1] ramp, or undefined
 // if this layer doesn't measure it (e.g. a grace note has no durationPct).
@@ -92,6 +94,7 @@ function timing(n: PlayedNote, c: Context): { ms: number; pct: number } {
 function position(n: PlayedNote, s: ReviewSettings, c: Context): number | undefined {
   switch (s.layer) {
     case 'notes':
+    case 'pedal':
       return undefined;
     case 'timing':
       return (timingScale(timing(n, c).pct, s) + 1) / 2;
@@ -104,20 +107,38 @@ function position(n: PlayedNote, s: ReviewSettings, c: Context): number | undefi
 
 export function colorFor(n: PlayedNote, s: ReviewSettings, c: Context): string {
   if (s.layer === 'notes') return n.status === 'played' ? NOTES.played : NOTES.missed;
-  if (n.status !== 'played') return NOT_MEASURED;
+  if (n.status !== 'played' || s.layer === 'pedal') return NOT_MEASURED;
   const pos = position(n, s, c);
   const ramps = { timing: TIMING_RAMP, duration: DURATION_RAMP, velocity: VELOCITY_RAMP };
   return pos === undefined ? NOT_MEASURED : ramp(ramps[s.layer], pos);
 }
 
+// A pedal sign's colour: on the timing ramp, grey if the pedal didn't move there.
+const pedalPosition = (p: PlayedPedal, s: ReviewSettings, c: Context) => (timingScale(pedalTiming(p, c).pct, s) + 1) / 2;
+export const pedalColor = (p: PlayedPedal, s: ReviewSettings, c: Context) =>
+  p.deltaMs === undefined ? NOT_MEASURED : ramp(TIMING_RAMP, pedalPosition(p, s, c));
+
 // Every played note, positioned on the same [0, 1] axis as the layer's ramp:
-// a strip plot to draw directly over it. Empty for the "notes" layer, which
+// a strip plot to draw directly over it, one row per group (hand, or pedal
+// down / up) where the layer splits them. Empty for the "notes" layer, which
 // has no ramp.
-export function distribution(a: Alignment, s: ReviewSettings, c: Context): number[] {
+export type DistRow = { label?: string; xs: number[] };
+
+export function distribution(a: Alignment, s: ReviewSettings, c: Context): DistRow[] {
   if (s.layer === 'notes') return [];
-  return a.notes
+  if (s.layer === 'pedal') {
+    const xs = (down: boolean) => a.pedals
+      .filter((p) => p.mark.down === down && p.deltaMs !== undefined)
+      .map((p) => clamp01(pedalPosition(p, s, c)));
+    return [{ label: 'Ped', xs: xs(true) }, { label: '*', xs: xs(false) }];
+  }
+  const xs = (notes: PlayedNote[]) => notes
     .filter((n) => n.status === 'played')
     .flatMap((n) => { const pos = position(n, s, c); return pos === undefined ? [] : [clamp01(pos)]; });
+  const rh = a.notes.filter((n) => n.expected.staff === 1), lh = a.notes.filter((n) => n.expected.staff === 2);
+  // Velocity: the two hands often aim for different dynamics.
+  if (s.layer === 'velocity' && xs(rh).length && xs(lh).length) return [{ label: 'RH', xs: xs(rh) }, { label: 'LH', xs: xs(lh) }];
+  return [{ xs: xs(a.notes) }];
 }
 
 const signed = (x: number, digits = 0) => `${x > 0 ? '+' : x < 0 ? '−' : '±'}${Math.abs(x).toFixed(digits)}`;
@@ -126,7 +147,8 @@ export function legend(s: ReviewSettings, c: Context): Legend | undefined {
   switch (s.layer) {
     case 'notes':
       return undefined;
-    case 'timing': {
+    case 'timing':
+    case 'pedal': {
       const r = s.maxOffsetBeats * 100;
       const values = s.timingLog ? [-r, -r / 5, 0, r / 5, r] : [-r, -r / 2, 0, r / 2, r];
       return {
@@ -200,6 +222,20 @@ export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
       return byHand(played, (n) => n.durationPct, (x) => `${x.toFixed(0)} %`);
     case 'velocity':
       return byHand(played, (n) => n.velocityPct, (x) => `${x.toFixed(0)} %`);
+    case 'pedal': {
+      if (!a.pedals.length) return 'no pedal signs in these bars';
+      const side = (down: boolean) => {
+        const all = a.pedals.filter((p) => p.mark.down === down);
+        const t = all.filter((p) => p.deltaMs !== undefined).map((p) => pedalTiming(p, c));
+        const median = t.length
+          ? ` median ${signed(quantile(t.map((x) => x.pct), 0.5))} % (${signed(quantile(t.map((x) => x.ms), 0.5))} ms)` : '';
+        return `${down ? 'down' : 'up'} ${t.length} / ${all.length}${median}`;
+      };
+      const parts = [side(true), side(false), `${a.pedalExtras.length} extra`];
+      if (!a.pedalReceived) parts.push('no pedal signal from the piano');
+      if (c.beatMs) parts.push(`1 beat = ${Math.round(c.beatMs)} ms`);
+      return [...parts, ...offsetPart(s, c)].join(' · ');
+    }
   }
 }
 
@@ -221,4 +257,14 @@ export function describe(n: PlayedNote, c: Context): string {
   ];
   if (n.pedal) parts.push('pedal');
   return parts.join(' · ');
+}
+
+// A pedal sign: one result, or two for a change sign (up, then down).
+export function describePedal(ps: PlayedPedal[], c: Context): string {
+  return ps.map((p) => {
+    const what = p.mark.down ? 'pedal down (Ped.)' : 'pedal up (*)';
+    if (p.deltaMs === undefined) return `${what} · missed`;
+    const t = pedalTiming(p, c);
+    return `${what} · ${signed(t.ms)} ms (${signed(t.pct)} % of beat)`;
+  }).join(' · ');
 }

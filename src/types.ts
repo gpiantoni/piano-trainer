@@ -20,6 +20,15 @@ export type ExpectedEvent = {
   measure: number;    // 0-based bar index in performance order
 };
 
+// A pedal sign in the score: Ped. (down) or * (up). A change sign is both, up
+// then down at the same time, sharing one id.
+export type PedalMark = {
+  id: string;         // verovio xml:id == SVG element id of the sign
+  down: boolean;
+  t: number;          // score ms at 1.0×
+  beatMs: number;     // one beat at this mark, at 1.0×
+};
+
 export type Staff = 1 | 2;   // 1 = right hand (upper staff), 2 = left hand
 
 export type Hands = 'both' | 'right' | 'left';
@@ -43,3 +52,14 @@ export type PlayedNote = {
 
 // A key press that matched no note in the score.
 export type Extra = { pitch: number; onsetMs: number; velocity: number; wrongFor?: string };
+
+// One pedal sign after a tempo run, like PlayedNote: when the pedal actually
+// went down (or up), if it did within the match window.
+export type PlayedPedal = {
+  mark: PedalMark;
+  atMs?: number;         // real ms from t0; undefined = missed
+  deltaMs?: number;      // atMs − the sign's time; negative = early
+};
+
+// A pedal change that matched no sign in the score.
+export type PedalExtra = { down: boolean; atMs: number };

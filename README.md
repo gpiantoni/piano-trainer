@@ -44,11 +44,14 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   score's tempo · one beat in ms, remembered per score), **Start** (or Space), one bar of count-in clicks,
   then play along with the cursor; 🔔 switches the metronome off after the
   count-in. Nothing is marked while you play. At the end (or **Stop**) the score
-  shows the run in four colour layers, switched in the strip at the bottom:
+  shows the run in colour layers, switched in the strip at the bottom:
   **Notes** (played / missed / × extra key), **Timing** (blue early, green on
   time, amber to red late, as % of a beat or of the note), **Duration** (% of the
-  written length held, amber short to deep purple long; blue ring = pedal down)
-  and **Velocity** (teal soft to navy loud). Missed notes, the other hand and
+  written length held, amber short to deep purple long; blue ring = pedal down),
+  **Velocity** (teal soft to navy loud, one strip row per hand) and, where the
+  score has Ped. / * signs, **Pedal** (each sign coloured on the timing scale by
+  when the sustain pedal went down or up; grey = it didn't, × = a change not in
+  the score). Missed notes, the other hand and
   notes after an early **Stop** are grey. Tap a note for
   its numbers. These are measurements, not grades. **Save run** downloads the
   raw recording as JSON. **⏱** calibrates latency: tap along with 8 clicks once
