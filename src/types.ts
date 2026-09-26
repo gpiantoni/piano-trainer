@@ -53,13 +53,17 @@ export type PlayedNote = {
 // A key press that matched no note in the score.
 export type Extra = { pitch: number; onsetMs: number; velocity: number; wrongFor?: string };
 
-// One pedal sign after a tempo run, like PlayedNote: when the pedal actually
-// went down (or up), if it did within the match window.
+// One pedalled span after a tempo run, like a PlayedNote: a Ped. sign and the
+// * (or change sign) that ends it. The down is timed against the Ped.; the up
+// is not a timing target, it gives how long the pedal was held.
 export type PlayedPedal = {
-  mark: PedalMark;
-  atMs?: number;         // real ms from t0; undefined = missed
+  mark: PedalMark;       // the Ped. sign
+  end?: PedalMark;       // the sign that lifts it; undefined if the score never does
+  atMs?: number;         // real ms from t0 the pedal went down; undefined = missed
   deltaMs?: number;      // atMs − the sign's time; negative = early
+  heldMs?: number;       // down → up; undefined = still down at the end of the run
+  durationPct?: number;  // heldMs as % of the written span, Ped. to *
 };
 
-// A pedal change that matched no sign in the score.
-export type PedalExtra = { down: boolean; atMs: number };
+// A pedal down that matched no Ped. sign in the score (its up belongs to it).
+export type PedalExtra = { atMs: number; heldMs?: number };

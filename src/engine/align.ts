@@ -51,19 +51,22 @@ export function pedalChanges(recording: NoteEvent[]): { down: boolean; t: number
   return out;
 }
 
+// The pedal's presses, like a key's: down, and up if it came.
+export function pedalPresses(recording: NoteEvent[]): { on: number; off?: number }[] {
+  const out: { on: number; off?: number }[] = [];
+  for (const { down, t } of pedalChanges(recording)) {
+    if (down) out.push({ on: t });
+    else out.at(-1)!.off = t;
+  }
+  return out;
+}
+
 // Key presses with their releases. A new press of a key still down (some pianos
 // never send the release in between) ends the previous one.
 export function keyPresses(recording: NoteEvent[]): Press[] {
   const events = [...recording].sort((a, b) => a.t - b.t);
   const presses: Press[] = [];
   const open = new Map<number, Press>();
-  const pedalDowns: [number, number][] = [];   // [down, up] intervals
-  let pedalSince: number | undefined;
-  for (const { down, t } of pedalChanges(events)) {
-    if (down) pedalSince = t;
-    else { pedalDowns.push([pedalSince!, t]); pedalSince = undefined; }
-  }
-
   for (const ev of events) {
     if (ev.type === 'pedal') continue;
     const held = open.get(ev.pitch);
@@ -74,10 +77,10 @@ export function keyPresses(recording: NoteEvent[]): Press[] {
       open.set(ev.pitch, press);
     }
   }
-  if (pedalSince !== undefined) pedalDowns.push([pedalSince, Infinity]);
+  const pedal = pedalPresses(events);
   for (const p of presses) {
     const end = p.off ?? p.on;
-    p.pedal = pedalDowns.some(([down, up]) => down <= end && up >= p.on);
+    p.pedal = pedal.some(({ on, off = Infinity }) => on <= end && off >= p.on);
   }
   return presses;
 }
@@ -199,42 +202,47 @@ export function align(
   return { notes, extras, ...alignPedal(pedalMarks, recording, speed, opts, from, to) };
 }
 
-// Pedal signs, like the notes of one pitch: downs with downs, ups with ups,
-// each in order, within the same match window. Not tied to a hand.
+// Pedal signs, like the notes of one pitch: each Ped. with the pedal going
+// down, in order, within the same match window; the * that ends its span with
+// the pedal's next lift, for how long it was held. Not tied to a hand.
 function alignPedal(
   marks: PedalMark[], recording: NoteEvent[], speed: number, opts: AlignOptions, from: number, to: number,
 ): Pick<Alignment, 'pedals' | 'pedalExtras' | 'pedalReceived'> {
-  const changes = pedalChanges(recording);
-  const played = new Map<PedalMark, number>();
-  const used = new Set<{ down: boolean; t: number }>();
-  for (const down of [true, false]) {
-    const exp = marks.filter((m) => m.down === down);
-    const got = changes.filter((c) => c.down === down);
-    if (exp.length === 0 || got.length === 0) continue;
+  const presses = pedalPresses(recording);
+  const downs = marks.filter((m) => m.down);
+  const played = new Map<PedalMark, { on: number; off?: number }>();
+  const used = new Set<{ on: number; off?: number }>();
+  if (downs.length && presses.length) {
     const match = alignTimes(
-      exp.map((m) => ({ t: m.t / speed, beat: m.beatMs / speed })), got.map((c) => c.t), opts.maxOffsetBeats, opts.biasMs,
+      downs.map((m) => ({ t: m.t / speed, beat: m.beatMs / speed })), presses.map((p) => p.on), opts.maxOffsetBeats, opts.biasMs,
     );
     match.forEach((j, i) => {
       if (j < 0) return;
-      played.set(exp[i], got[j].t);
-      used.add(got[j]);
+      played.set(downs[i], presses[j]);
+      used.add(presses[j]);
     });
   }
 
-  // In the section: a down from its first downbeat, an up until its last barline.
+  // In the section: a Ped. from its first downbeat until its last barline.
   const { startMs, endMs } = opts.window;
-  const inWindow = (m: PedalMark) => (m.down
-    ? m.t >= startMs - 1e-6 && m.t < endMs - 1e-6
-    : m.t > startMs + 1e-6 && m.t <= endMs + 1e-6);
-  const pedals: PlayedPedal[] = marks
-    .filter((m) => inWindow(m) && (m.t / speed <= opts.untilMs || played.has(m)))
+  const pedals: PlayedPedal[] = downs
+    .filter((m) => m.t >= startMs - 1e-6 && m.t < endMs - 1e-6 && (m.t / speed <= opts.untilMs || played.has(m)))
     .map((mark) => {
-      const atMs = played.get(mark);
-      return atMs === undefined ? { mark } : { mark, atMs, deltaMs: atMs - mark.t / speed };
+      // Marks are sorted with an up before a down at the same time: the first
+      // up after this down, even a change sign sharing its time with the next Ped.
+      const end = marks.find((m) => !m.down && m.t > mark.t);
+      const press = played.get(mark);
+      if (!press) return { mark, end };
+      const heldMs = press.off === undefined ? undefined : press.off - press.on;
+      const written = end && (end.t - mark.t) / speed;
+      return {
+        mark, end, atMs: press.on, deltaMs: press.on - mark.t / speed, heldMs,
+        durationPct: heldMs === undefined || !written ? undefined : (heldMs / written) * 100,
+      };
     });
-  const pedalExtras = changes
-    .filter((c) => !used.has(c) && c.t >= from && c.t < to)
-    .map((c) => ({ down: c.down, atMs: c.t }));
+  const pedalExtras = presses
+    .filter((p) => !used.has(p) && p.on >= from && p.on < to)
+    .map((p) => ({ atMs: p.on, heldMs: p.off === undefined ? undefined : p.off - p.on }));
   return { pedals, pedalExtras, pedalReceived: recording.some((e) => e.type === 'pedal') };
 }
 

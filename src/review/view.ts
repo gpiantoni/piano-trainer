@@ -2,7 +2,7 @@ import { OFFSET_MIN_NOTES, type Alignment } from '../engine/align.ts';
 import type { CursorMap } from '../score/cursor.ts';
 import type { PlayedNote, PlayedPedal } from '../types.ts';
 import {
-  DEFAULT_SETTINGS, colorFor, context, describe, describePedal, distribution, legend, pedalColor, pitchName, summary,
+  DEFAULT_SETTINGS, colorFor, context, describe, describePedal, panels, pedalColor, pitchName, summary,
   type Layer, type Offset, type ReviewSettings,
 } from './layers.ts';
 import { DURATION_RANGES, MATCH_WINDOWS } from './palettes.ts';
@@ -54,7 +54,8 @@ export class ReviewView {
   private cursorMap: CursorMap | undefined;
   private byNoteId = new Map<string, PlayedNote>();
   private pedalEls = new Map<string, Element>();
-  private byPedalId = new Map<string, PlayedPedal[]>();
+  // A sign's id -> the span it ends (*) and the one it starts (Ped.); a change sign does both.
+  private byPedalId = new Map<string, { ends?: PlayedPedal; starts?: PlayedPedal }>();
   private markers: HTMLElement[] = [];
   private popover = Object.assign(document.createElement('div'), { className: 'popover', hidden: true });
   private opts: Options;
@@ -68,6 +69,9 @@ export class ReviewView {
     document.addEventListener('click', (e) => {
       if (!opts.score.contains(e.target as Node)) this.popover.hidden = true;
     });
+    // The strip wraps to more rows on narrow screens and in the Pedal layer:
+    // keep the end of the score scrollable above it, whatever its height.
+    new ResizeObserver(() => document.body.style.setProperty('--strip-h', `${opts.strip.offsetHeight}px`)).observe(opts.strip);
   }
 
   get active() { return !!this.alignment; }
@@ -78,7 +82,11 @@ export class ReviewView {
     this.offset = offset;
     this.byNoteId = new Map(alignment.notes.flatMap((n) => [n.expected.id, ...n.expected.tiedIds].map((id) => [id, n])));
     this.byPedalId = new Map();
-    for (const p of alignment.pedals) this.byPedalId.set(p.mark.id, [...this.byPedalId.get(p.mark.id) ?? [], p]);
+    const sign = (id: string) => this.byPedalId.get(id) ?? this.byPedalId.set(id, {}).get(id)!;
+    for (const p of alignment.pedals) {
+      sign(p.mark.id).starts = p;
+      if (p.end) sign(p.end.id).ends = p;
+    }
     this.render();
   }
 
@@ -141,7 +149,10 @@ export class ReviewView {
       const on = !!(a && ps) && s.layer === 'pedal';
       el.classList.toggle('review', on);
       // A change sign: coloured by the pedal going down again.
-      if (on) (el as HTMLElement).style.setProperty('--note', pedalColor(ps!.at(-1)!, s, c!));
+      if (on) {
+        const color = ps!.starts ? pedalColor(ps!.starts, 'down', s, c!) : pedalColor(ps!.ends!, 'up', s, c!);
+        (el as HTMLElement).style.setProperty('--note', color);
+      }
       else (el as HTMLElement).style.removeProperty('--note');
     }
 
@@ -152,8 +163,8 @@ export class ReviewView {
       for (const x of a.pedalExtras) {
         const pos = this.cursorMap.position(Math.max(0, x.atMs * this.speed));
         if (!pos) continue;
-        const what = `extra pedal ${x.down ? 'down' : 'up'}`;
-        this.addMarker(what, `${what} · not in the score`, pos.x, pos.bottom, 'below');
+        const held = x.heldMs === undefined ? 'still down' : `held ${x.heldMs.toFixed(0)} ms`;
+        this.addMarker('extra pedal', `pedal down · not in the score · ${held}`, pos.x, pos.bottom, 'below');
       }
       return;
     }
@@ -210,13 +221,12 @@ export class ReviewView {
 
     const bottom = document.createElement('div');
     bottom.className = 'strip-row';
-    const lg = legend(s, c);
-    if (lg) {
+    for (const { legend: lg, rows } of panels(a, s, c)) {
       const wrap = document.createElement('div');
       wrap.className = 'ramp-wrap';
       wrap.classList.toggle('tall', lg.ticks.some((t) => t.label.includes('\n')));
 
-      for (const row of distribution(a, s, c)) {
+      for (const row of rows) {
         const dist = document.createElement('div');
         dist.className = 'dist';
         if (row.label) dist.dataset.label = row.label;
@@ -244,6 +254,8 @@ export class ReviewView {
     const matchWindow = segment('match window ±', ...MATCH_WINDOWS.map((w) =>
       button(`${Math.round(w * 100)} %`, s.maxOffsetBeats === w, () => this.set({ maxOffsetBeats: w }),
         'How far off a key may be and still count as that note, as % of a beat; also the timing colour range')));
+    const durationRange = segment('range 0–', ...DURATION_RANGES.map((r) =>
+      button(`${r} %`, s.durationMax === r, () => this.set({ durationMax: r }))));
     switch (s.layer) {
       case 'notes':
         bottom.append(
@@ -255,8 +267,8 @@ export class ReviewView {
         );
         break;
       case 'pedal':
-        bottom.append(matchWindow, Object.assign(document.createElement('span'), {
-          className: 'key-legend', innerHTML: '<i class="k unmoved"></i>pedal didn\'t move <b class="k-x">×</b> extra change',
+        bottom.append(matchWindow, durationRange, Object.assign(document.createElement('span'), {
+          className: 'key-legend', innerHTML: '<i class="k unmoved"></i>pedal didn\'t go down <b class="k-x">×</b> extra pedal',
         }));
         break;
       case 'timing':
@@ -266,7 +278,7 @@ export class ReviewView {
         );
         break;
       case 'duration':
-        bottom.append(segment('range 0–', ...DURATION_RANGES.map((r) => button(`${r} %`, s.durationMax === r, () => this.set({ durationMax: r })))),
+        bottom.append(durationRange,
           Object.assign(document.createElement('span'), { className: 'key-legend', innerHTML: '<i class="k ring"></i>pedal down' }));
         break;
       case 'velocity':
@@ -292,7 +304,7 @@ export class ReviewView {
     if (pedal) {
       for (const [id, el] of this.pedalEls) {
         const ps = this.byPedalId.get(id);
-        if (ps) consider(el, () => describePedal(ps, c));
+        if (ps) consider(el, () => describePedal(ps.ends, ps.starts, c));
       }
     } else {
       for (const [id, el] of this.noteEls) {

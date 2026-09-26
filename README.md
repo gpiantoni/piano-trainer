@@ -49,9 +49,10 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   time, amber to red late, as % of a beat or of the note), **Duration** (% of the
   written length held, amber short to deep purple long; blue ring = pedal down),
   **Velocity** (teal soft to navy loud, one strip row per hand) and, where the
-  score has Ped. / * signs, **Pedal** (each sign coloured on the timing scale by
-  when the sustain pedal went down or up; grey = it didn't, × = a change not in
-  the score). Missed notes, the other hand and
+  score has Ped. / * signs, **Pedal** (each Ped. to * read like a note: Ped.
+  coloured on the timing scale by when the sustain pedal went down, * on the
+  duration scale by how long it stayed down, as % of the written span; grey =
+  it didn't go down, × = a pedal not in the score). Missed notes, the other hand and
   notes after an early **Stop** are grey. Tap a note for
   its numbers. These are measurements, not grades. **Save run** downloads the
   raw recording as JSON. **⏱** calibrates latency: tap along with 8 clicks once

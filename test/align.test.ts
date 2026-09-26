@@ -199,7 +199,7 @@ test('pedal changes: a stream of values counts once, and the pedal starts up', (
   assert.deepEqual(pedalChanges(rec), [{ down: true, t: 100 }, { down: false, t: 400 }]);
 });
 
-test('pedal signs: downs pair with downs, ups with ups; missed, extra, and outside the section', () => {
+test('pedal signs: each Ped. timed like a note onset, held until the next lift as % of its span', () => {
   // Ped. on every bar's downbeat (4 beats), * at its barline.
   const marks: PedalMark[] = [0, 1, 2].flatMap((bar) => [
     { id: `d${bar}`, down: true, t: bar * 4 * BEAT, beatMs: BEAT },
@@ -208,23 +208,29 @@ test('pedal signs: downs pair with downs, ups with ups; missed, extra, and outsi
   const s = score(Array.from({ length: 12 }, () => 60));
   const rec: NoteEvent[] = [
     ...perform(s),
-    { type: 'pedal', down: true, t: 50 },       // bar 0: down 50 ms late
-    { type: 'pedal', down: false, t: 1000 },    // an extra lift mid-bar, and down again
-    { type: 'pedal', down: true, t: 1020 },
-    { type: 'pedal', down: false, t: 1990 },    // * 10 ms early
+    { type: 'pedal', down: true, t: 50 },       // bar 0: down 50 ms late, lifted mid-bar,
+    { type: 'pedal', down: false, t: 1050 },
+    { type: 'pedal', down: true, t: 1070 },     // and down again: not in the score
+    { type: 'pedal', down: false, t: 1990 },
     // bar 1: never pressed
-    { type: 'pedal', down: true, t: 4100 },     // bar 2: +100 ms
-    { type: 'pedal', down: false, t: 6000 },
+    { type: 'pedal', down: true, t: 4100 },     // bar 2: +100 ms, lifted a beat early
+    { type: 'pedal', down: false, t: 5500 },
   ];
   const a = align(s, rec, 1, { maxOffsetBeats: 0.3 }, marks);
-  const got = Object.fromEntries(a.pedals.map((p) => [p.mark.id, p.deltaMs]));
-  assert.deepEqual(got, { d0: 50, u0: -10, d1: undefined, u1: undefined, d2: 100, u2: 0 });
-  assert.deepEqual(a.pedalExtras, [{ down: false, atMs: 1000 }, { down: true, atMs: 1020 }]);
+  const got = Object.fromEntries(a.pedals.map((p) => [p.mark.id, [p.end?.id, p.deltaMs, p.heldMs, p.durationPct]]));
+  assert.deepEqual(got, {
+    d0: ['u0', 50, 1000, 50], d1: ['u1', undefined, undefined, undefined], d2: ['u2', 100, 1400, 70],
+  });
+  assert.deepEqual(a.pedalExtras, [{ atMs: 1070, heldMs: 920 }]);
   assert.equal(a.pedalReceived, true);
 
-  // Bar 1 alone: its Ped. and its *, not bar 0's * on the same barline.
+  // Lifted far from the * (here 2 beats early): still a measured duration, not an extra.
+  const early = align(s, [...perform(s), { type: 'pedal', down: true, t: 0 }, { type: 'pedal', down: false, t: 1000 }], 1, { maxOffsetBeats: 0.3 }, marks);
+  assert.deepEqual([early.pedals[0].durationPct, early.pedalExtras], [50, []]);
+
+  // Bar 1 alone: its Ped. only, not bar 2's on the closing barline.
   const sec = align(s, rec, 1, { maxOffsetBeats: 0.3, window: { startMs: 2000, endMs: 4000 } }, marks);
-  assert.deepEqual(sec.pedals.map((p) => p.mark.id), ['d1', 'u1']);
+  assert.deepEqual(sec.pedals.map((p) => p.mark.id), ['d1']);
   assert.equal(align(s, perform(s), 1, {}, marks).pedalReceived, false);
 });
 

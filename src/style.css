@@ -104,7 +104,7 @@ g.note.review.pedal > .notehead use { stroke: var(--pedal); stroke-width: 70px; 
 g.pedal.review, g.pedal.review * { fill: var(--note); color: var(--note); }
 g.pedal.review use { stroke: var(--note); stroke-width: 40px; }
 
-body.reviewing { padding-bottom: 9.5rem; }
+body.reviewing { padding-bottom: calc(var(--strip-h, 8.5rem) + 1rem); }
 
 .strip {
   position: fixed;

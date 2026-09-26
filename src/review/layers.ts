@@ -113,25 +113,22 @@ export function colorFor(n: PlayedNote, s: ReviewSettings, c: Context): string {
   return pos === undefined ? NOT_MEASURED : ramp(ramps[s.layer], pos);
 }
 
-// A pedal sign's colour: on the timing ramp, grey if the pedal didn't move there.
-const pedalPosition = (p: PlayedPedal, s: ReviewSettings, c: Context) => (timingScale(pedalTiming(p, c).pct, s) + 1) / 2;
-export const pedalColor = (p: PlayedPedal, s: ReviewSettings, c: Context) =>
-  p.deltaMs === undefined ? NOT_MEASURED : ramp(TIMING_RAMP, pedalPosition(p, s, c));
+// A pedalled span, like a note: the Ped. sign on the timing ramp (when the
+// pedal went down), the * on the duration ramp (how long it stayed down).
+// Grey where there's no measurement.
+const pedalTimingPos = (p: PlayedPedal, s: ReviewSettings, c: Context) => (timingScale(pedalTiming(p, c).pct, s) + 1) / 2;
+const pedalHeldPos = (p: PlayedPedal, s: ReviewSettings) => p.durationPct! / s.durationMax;
+export const pedalColor = (p: PlayedPedal, sign: 'down' | 'up', s: ReviewSettings, c: Context) => {
+  if (sign === 'down') return p.deltaMs === undefined ? NOT_MEASURED : ramp(TIMING_RAMP, pedalTimingPos(p, s, c));
+  return p.durationPct === undefined ? NOT_MEASURED : ramp(DURATION_RAMP, pedalHeldPos(p, s));
+};
 
 // Every played note, positioned on the same [0, 1] axis as the layer's ramp:
-// a strip plot to draw directly over it, one row per group (hand, or pedal
-// down / up) where the layer splits them. Empty for the "notes" layer, which
-// has no ramp.
+// a strip plot to draw directly over it, one row per hand where the layer
+// splits them.
 export type DistRow = { label?: string; xs: number[] };
 
-export function distribution(a: Alignment, s: ReviewSettings, c: Context): DistRow[] {
-  if (s.layer === 'notes') return [];
-  if (s.layer === 'pedal') {
-    const xs = (down: boolean) => a.pedals
-      .filter((p) => p.mark.down === down && p.deltaMs !== undefined)
-      .map((p) => clamp01(pedalPosition(p, s, c)));
-    return [{ label: 'Ped', xs: xs(true) }, { label: '*', xs: xs(false) }];
-  }
+function distribution(a: Alignment, s: ReviewSettings, c: Context): DistRow[] {
   const xs = (notes: PlayedNote[]) => notes
     .filter((n) => n.status === 'played')
     .flatMap((n) => { const pos = position(n, s, c); return pos === undefined ? [] : [clamp01(pos)]; });
@@ -143,12 +140,30 @@ export function distribution(a: Alignment, s: ReviewSettings, c: Context): DistR
 
 const signed = (x: number, digits = 0) => `${x > 0 ? '+' : x < 0 ? '−' : '±'}${Math.abs(x).toFixed(digits)}`;
 
-export function legend(s: ReviewSettings, c: Context): Legend | undefined {
+// The layer's ramps, each with its strip plot above it: none for "notes", two
+// for "pedal" (down timing, held duration), one for the others.
+export type Panel = { legend: Legend; rows: DistRow[] };
+
+export function panels(a: Alignment, s: ReviewSettings, c: Context): Panel[] {
   switch (s.layer) {
     case 'notes':
-      return undefined;
-    case 'timing':
+      return [];
     case 'pedal': {
+      const pos = (f: (p: PlayedPedal) => number | undefined) =>
+        a.pedals.flatMap((p) => { const x = f(p); return x === undefined ? [] : [clamp01(x)]; });
+      return [
+        { legend: legend('timing', s, c), rows: [{ label: 'Ped', xs: pos((p) => (p.deltaMs === undefined ? undefined : pedalTimingPos(p, s, c))) }] },
+        { legend: legend('duration', s, c), rows: [{ label: 'held', xs: pos((p) => (p.durationPct === undefined ? undefined : pedalHeldPos(p, s))) }] },
+      ];
+    }
+    default:
+      return [{ legend: legend(s.layer, s, c), rows: distribution(a, s, c) }];
+  }
+}
+
+function legend(layer: 'timing' | 'duration' | 'velocity', s: ReviewSettings, c: Context): Legend {
+  switch (layer) {
+    case 'timing': {
       const r = s.maxOffsetBeats * 100;
       const values = s.timingLog ? [-r, -r / 5, 0, r / 5, r] : [-r, -r / 2, 0, r / 2, r];
       return {
@@ -224,14 +239,13 @@ export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
       return byHand(played, (n) => n.velocityPct, (x) => `${x.toFixed(0)} %`);
     case 'pedal': {
       if (!a.pedals.length) return 'no pedal signs in these bars';
-      const side = (down: boolean) => {
-        const all = a.pedals.filter((p) => p.mark.down === down);
-        const t = all.filter((p) => p.deltaMs !== undefined).map((p) => pedalTiming(p, c));
-        const median = t.length
-          ? ` median ${signed(quantile(t.map((x) => x.pct), 0.5))} % (${signed(quantile(t.map((x) => x.ms), 0.5))} ms)` : '';
-        return `${down ? 'down' : 'up'} ${t.length} / ${all.length}${median}`;
-      };
-      const parts = [side(true), side(false), `${a.pedalExtras.length} extra`];
+      const down = a.pedals.filter((p) => p.deltaMs !== undefined);
+      const t = down.map((p) => pedalTiming(p, c));
+      const held = down.flatMap((p) => (p.durationPct === undefined ? [] : [p.durationPct]));
+      const parts = [`down ${down.length} / ${a.pedals.length}`];
+      if (t.length) parts.push(`median ${signed(quantile(t.map((x) => x.pct), 0.5))} % (${signed(quantile(t.map((x) => x.ms), 0.5))} ms)`);
+      if (held.length) parts.push(`held median ${quantile(held, 0.5).toFixed(0)} %`);
+      parts.push(`${a.pedalExtras.length} extra`);
       if (!a.pedalReceived) parts.push('no pedal signal from the piano');
       if (c.beatMs) parts.push(`1 beat = ${Math.round(c.beatMs)} ms`);
       return [...parts, ...offsetPart(s, c)].join(' · ');
@@ -259,12 +273,21 @@ export function describe(n: PlayedNote, c: Context): string {
   return parts.join(' · ');
 }
 
-// A pedal sign: one result, or two for a change sign (up, then down).
-export function describePedal(ps: PlayedPedal[], c: Context): string {
-  return ps.map((p) => {
-    const what = p.mark.down ? 'pedal down (Ped.)' : 'pedal up (*)';
-    if (p.deltaMs === undefined) return `${what} · missed`;
-    const t = pedalTiming(p, c);
-    return `${what} · ${signed(t.ms)} ms (${signed(t.pct)} % of beat)`;
-  }).join(' · ');
+// A pedalled span, from its Ped. or its * sign. A change sign is both: the
+// span it ends, then the one it starts.
+const held = (p: PlayedPedal) => (p.heldMs === undefined
+  ? 'still down' : `held ${p.heldMs.toFixed(0)} ms (${p.durationPct?.toFixed(0) ?? '—'} %)`);
+
+export function describePedal(ends: PlayedPedal | undefined, starts: PlayedPedal | undefined, c: Context): string {
+  const parts: string[] = [];
+  if (ends) parts.push(ends.deltaMs === undefined ? 'pedal up (*) · pedal wasn\'t down' : `pedal up (*) · ${held(ends)}`);
+  if (starts) {
+    if (starts.deltaMs === undefined) parts.push('pedal down (Ped.) · missed');
+    else {
+      const t = pedalTiming(starts, c);
+      parts.push(`pedal down (Ped.) · ${signed(t.ms)} ms (${signed(t.pct)} % of beat)`);
+      if (!starts.end) parts.push(held(starts));
+    }
+  }
+  return parts.join(' · ');
 }
