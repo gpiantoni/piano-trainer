@@ -781,10 +781,14 @@ listenMidi(onNote, (s) => {
   midi.title = s.kind === 'denied' ? s.message : '';
 });
 
-// Dev only: play without a piano from the console, e.g. `__play(67)`.
+// Dev only: play without a piano from the console.
 if (import.meta.env.DEV) {
   Object.assign(window, {
-    __play: (pitch: number) => onNote({ type: 'on', pitch, velocity: 64, t: performance.now() }),
+    // `__play(57, 60, 64)` presses the keys together, then lets them go.
+    __play: (...pitches: number[]) => {
+      for (const pitch of pitches) onNote({ type: 'on', pitch, velocity: 64, t: performance.now() });
+      for (const pitch of pitches) onNote({ type: 'off', pitch, velocity: 0, t: performance.now() });
+    },
     __practice: () => practice,
     __run: () => run,
     __cursor: () => cursorMap,

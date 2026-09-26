@@ -36,9 +36,10 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   gitignored except `public-domain/`, and `scores/manifest.json` is generated from
   whatever is there, so the deployed build lists only the public-domain pieces.
 
-  **Wait mode**: the score waits for the next chord; it turns green
-  and advances once every note in it is pressed, and a wrong key flashes the
-  expected notes red and does not advance.
+  **Wait mode**: the score waits for the next chord (both hands); it turns
+  green and advances once every note in it is held down at the same time, so a
+  chord played one note at a time doesn't count. A wrong key flashes the notes
+  not yet down red and does not advance.
 
   **Tempo mode**: pick a tempo (−/+ in steps of 5 bpm; shown as bpm · % of the
   score's tempo · one beat in ms, remembered per score), **Start** (or Space), one bar of count-in clicks,
@@ -66,7 +67,7 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   **Both / Left / Right** picks the hand in either mode: the other staff greys
   out and is not asked for. **Full screen** hides the browser bars on the tablet.
 
-  No piano at hand? In the dev console, `__play(67)` presses G4,
+  No piano at hand? In the dev console, `__play(67)` presses G4 and `__play(57, 60, 64)` a chord,
   `__practice().expected` lists what wait mode is waiting for, and
   `__replay(recording, speed)` shows a saved run's `recording` in review.
 

@@ -1,8 +1,9 @@
 import type { ExpectedEvent, Hands, NoteEvent } from '../types.ts';
 
 // Wait mode: no clock. The score waits on the current chord (all events sharing
-// an onset) until every pitch in it has been pressed, then advances. With one
-// hand selected, the other hand's notes are left out entirely.
+// an onset, both hands) until every pitch in it is held down at once, then
+// advances: a chord played one note at a time doesn't count. With one hand
+// selected, the other hand's notes are left out entirely.
 
 export type NoteState = 'hit' | 'muted';
 
@@ -12,7 +13,6 @@ export const forHands = (hands: Hands) => (ev: ExpectedEvent) =>
 export type Chord = { onMs: number; events: ExpectedEvent[] };
 
 export type Feedback =
-  | { kind: 'hit'; event: ExpectedEvent }
   | { kind: 'advance'; chord: number }
   | { kind: 'wrong'; pitch: number; expected: number[] }
   | { kind: 'done' };
@@ -31,7 +31,7 @@ export class WaitMode {
   readonly chords: Chord[];
   cursor = 0;
   wrong = 0;
-  private pending = new Set<number>();
+  private held = new Set<number>();   // chord pitches pressed since it came up, still down
 
   private muted: ExpectedEvent[];
 
@@ -45,11 +45,14 @@ export class WaitMode {
   get done() { return this.cursor >= this.chords.length; }
   get current(): Chord | undefined { return this.chords[this.cursor]; }
 
-  // Pitches of the current chord not yet played.
-  get expected(): number[] { return [...this.pending].sort((a, b) => a - b); }
+  // Pitches of the current chord not held down right now.
+  get expected(): number[] {
+    return [...new Set(this.current?.events.map((e) => e.pitch))].filter((p) => !this.held.has(p)).sort((a, b) => a - b);
+  }
 
   // Visual state of every notehead id; the view re-applies this after a re-layout.
-  // Notes still to play have no state: they stay black.
+  // Notes still to play have no state: they stay black, the current chord's
+  // too until all of it is down.
   noteStates(): Map<string, NoteState> {
     const states = new Map<string, NoteState>();
     const mark = (ev: ExpectedEvent, s: NoteState) => {
@@ -59,30 +62,21 @@ export class WaitMode {
     for (let i = 0; i < Math.min(this.cursor, this.chords.length); i++) {
       for (const ev of this.chords[i].events) mark(ev, 'hit');
     }
-    for (const ev of this.current?.events ?? []) {
-      if (!this.pending.has(ev.pitch)) mark(ev, 'hit');
-    }
     return states;
   }
 
   handle(ev: NoteEvent): Feedback[] {
-    if (ev.type !== 'on' || this.done) return [];
+    if (ev.type === 'pedal' || this.done) return [];
+    if (ev.type === 'off') { this.held.delete(ev.pitch); return []; }
     const chord = this.current!;
 
-    if (this.pending.delete(ev.pitch)) {
-      // A unison (both hands on one pitch) is satisfied by a single press.
-      const out: Feedback[] = chord.events
-        .filter((e) => e.pitch === ev.pitch)
-        .map((event) => ({ kind: 'hit', event }));
-      if (this.pending.size === 0) {
-        this.enter(this.cursor + 1);
-        out.push(this.done ? { kind: 'done' } : { kind: 'advance', chord: this.cursor });
-      }
-      return out;
+    // A unison (both hands on one pitch) is satisfied by a single key.
+    if (chord.events.some((e) => e.pitch === ev.pitch)) {
+      this.held.add(ev.pitch);
+      if (this.expected.length) return [];
+      this.enter(this.cursor + 1);
+      return [this.done ? { kind: 'done' } : { kind: 'advance', chord: this.cursor }];
     }
-
-    // Re-striking a note of this chord that is already green is not a mistake.
-    if (chord.events.some((e) => e.pitch === ev.pitch)) return [];
 
     this.wrong++;
     return [{ kind: 'wrong', pitch: ev.pitch, expected: this.expected }];
@@ -95,7 +89,8 @@ export class WaitMode {
 
   private enter(index: number) {
     this.cursor = index;
-    this.pending = new Set(this.chords[index]?.events.map((e) => e.pitch) ?? []);
+    // Keys still down from the chord before must be struck again.
+    this.held = new Set();
   }
 }
 
