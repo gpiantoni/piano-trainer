@@ -6,7 +6,7 @@ import { listenMidi } from './midi/input.ts';
 import { WaitMode, forHands, noteName, type Feedback } from './engine/waitMode.ts';
 import { Metronome } from './engine/metronome.ts';
 import { TempoRun } from './engine/tempoRun.ts';
-import { align, runOffset } from './engine/align.ts';
+import { OFFSET_MIN_NOTES, align, runOffset } from './engine/align.ts';
 import { CALIBRATION, estimateLatency } from './engine/calibration.ts';
 import { ReviewView } from './review/view.ts';
 import { WIDEST_WINDOW } from './review/palettes.ts';
@@ -78,6 +78,7 @@ app.innerHTML = `
     <div class="calib-buttons">
       <button id="calibGo" class="primary">Start</button>
       <button id="calibSave" disabled>Save</button>
+      <button id="calibRun" hidden></button>
       <button id="calibClose">Close</button>
     </div>
   </dialog>
@@ -133,6 +134,8 @@ type LastRun = {
   window: PlayWindow;
 };
 let lastRun: LastRun | undefined;
+// Its median timing offset (real ms, after latencyMs), as re-center uses it.
+let lastOffset: ReturnType<typeof runOffset> | undefined;
 
 const metronome = new Metronome();
 metronome.enabled = store.get('click') !== 'off';
@@ -456,6 +459,7 @@ function analyse() {
   const widest = WIDEST_WINDOW;
   const wide = align(timing.events, recording, runSpeed, { ...base, maxOffsetBeats: widest }, timing.pedals);
   const offset = runOffset(wide);
+  lastOffset = offset;
   const biasMs = recenter ? offset.ms ?? 0 : 0;
   const chosen = biasMs === 0 && maxOffsetBeats === widest
     ? wide
@@ -540,11 +544,36 @@ function showLatency() {
 }
 showLatency();
 
+// The last run's own offset on top of the latency it was recorded with: what
+// re-center would zero on, kept as the latency for the runs after it.
+const calibRun = $<HTMLButtonElement>('calibRun');
+const fromRun = () => (lastRun && lastOffset?.ms !== undefined ? Math.round(lastRun.latencyMs + lastOffset.ms) : undefined);
+
 latencyButton.onclick = () => {
   stopRun();
   calibStatus.textContent = `Current: ${latencyMs} ms`;
   $<HTMLButtonElement>('calibSave').disabled = true;
+  const next = fromRun();
+  calibRun.hidden = !lastRun;
+  calibRun.disabled = next === undefined;
+  calibRun.textContent = next === undefined ? 'From last run' : `From last run: ${next} ms`;
+  calibRun.title = next === undefined
+    ? `Needs ≥ ${OFFSET_MIN_NOTES} timed notes (the last run has ${lastOffset?.notes ?? 0})`
+    : `The last run's median offset (${Math.round(lastOffset!.ms!)} ms) added to the ${lastRun!.latencyMs} ms it was recorded with: the re-center value`;
   calib.showModal();
+};
+
+calibRun.onclick = () => {
+  const next = fromRun();
+  if (next === undefined || !lastRun) return;
+  // Re-read the last run as if it had been recorded with the new latency.
+  const shift = next - lastRun.latencyMs;
+  lastRun = { ...lastRun, latencyMs: next, recording: lastRun.recording.map((ev) => ({ ...ev, t: ev.t - shift })) };
+  latencyMs = next;
+  store.set('latencyMs', String(latencyMs));
+  showLatency();
+  calib.close();
+  analyse();
 };
 
 $('calibGo').onclick = async () => {
