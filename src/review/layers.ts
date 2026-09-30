@@ -1,17 +1,16 @@
 import { OFFSET_MIN_NOTES, type Alignment } from '../engine/align.ts';
 import type { PlayedNote, PlayedPedal } from '../types.ts';
-import {
-  DURATION_RAMP, NOTES, NOT_MEASURED, TIMING_LOG_KNEE, TIMING_RAMP, VELOCITY_RAMP,
-} from './palettes.ts';
+import { NOT_MEASURED, RAMP, TIMING_CRITERIA, TIMING_LOG_KNEE } from './palettes.ts';
 
 // PlayedNote -> colour, legend and one-line summary, per review layer.
-// Measurements, not judgements: no layer but "notes" has a good colour.
+// Measurements on one shared ramp; the only line drawn is the timing criterion
+// the user picked.
 
-export type Layer = 'notes' | 'timing' | 'duration' | 'velocity' | 'pedal';
+export type Layer = 'notes' | 'duration' | 'velocity' | 'pedal';
 
 export type ReviewSettings = {
   layer: Layer;
-  maxOffsetBeats: number;  // match window, one of MATCH_WINDOWS; also the timing ramp's ± range
+  within: number;          // timing criterion, one of TIMING_CRITERIA's; sets the match window too
   timingLog: boolean;
   durationMax: number;     // %
   velocityFit: boolean;    // fit the ramp to this run instead of 0–100
@@ -19,11 +18,18 @@ export type ReviewSettings = {
 };
 
 export const DEFAULT_SETTINGS: ReviewSettings = {
-  layer: 'notes', maxOffsetBeats: 0.3,
+  layer: 'notes', within: 0.1,
   timingLog: false, durationMax: 150, velocityFit: false, recenter: false,
 };
 
-export type Legend = { gradient: string; ticks: { at: number; label: string }[] };
+// marks: positions on the ramp to draw a line at (the timing criterion's edges).
+export type Legend = { gradient: string; ticks: { at: number; label: string }[]; marks?: number[] };
+
+const GRADIENT = `linear-gradient(in oklab to right, ${RAMP.join(', ')})`;
+
+// The match window paired with the criterion: also the timing ramp's ± range.
+export const windowOf = (s: ReviewSettings) =>
+  (TIMING_CRITERIA.find((t) => t.within === s.within) ?? TIMING_CRITERIA[0]).window;
 
 const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
 const mix = (a: string, b: string, bShare: number) =>
@@ -45,7 +51,7 @@ const quantile = (xs: number[], q: number) => {
 // Timing: signed position in [-1, 1]. Full colour at the match window's edge,
 // so every played note falls on the ramp.
 function timingScale(pct: number, s: ReviewSettings): number {
-  const k = TIMING_LOG_KNEE, range = s.maxOffsetBeats * 100;
+  const k = TIMING_LOG_KNEE, range = windowOf(s) * 100;
   const v = s.timingLog
     ? (Math.sign(pct) * Math.log1p(Math.abs(pct) / k)) / Math.log1p(range / k)
     : pct / range;
@@ -93,10 +99,9 @@ const pedalTiming = (p: PlayedPedal, c: Context) => timingOf(p.deltaMs!, p.mark.
 // so the dots always line up with the ramp under them.
 function position(n: PlayedNote, s: ReviewSettings, c: Context): number | undefined {
   switch (s.layer) {
-    case 'notes':
     case 'pedal':
       return undefined;
-    case 'timing':
+    case 'notes':
       return (timingScale(timing(n, c).pct, s) + 1) / 2;
     case 'duration':
       return n.durationPct === undefined ? undefined : n.durationPct / s.durationMax;
@@ -106,11 +111,17 @@ function position(n: PlayedNote, s: ReviewSettings, c: Context): number | undefi
 }
 
 export function colorFor(n: PlayedNote, s: ReviewSettings, c: Context): string {
-  if (s.layer === 'notes') return n.status === 'played' ? NOTES.played : NOTES.missed;
-  if (n.status !== 'played' || s.layer === 'pedal') return NOT_MEASURED;
+  if (n.status !== 'played') return NOT_MEASURED;
   const pos = position(n, s, c);
-  const ramps = { timing: TIMING_RAMP, duration: DURATION_RAMP, velocity: VELOCITY_RAMP };
-  return pos === undefined ? NOT_MEASURED : ramp(ramps[s.layer], pos);
+  return pos === undefined ? NOT_MEASURED : ramp(RAMP, pos);
+}
+
+// A played note further from the (re-centered) score time than the criterion.
+export function outside(n: PlayedNote, s: ReviewSettings, c: Context): 'early' | 'late' | undefined {
+  if (n.status !== 'played') return undefined;
+  const { pct } = timing(n, c);
+  if (Math.abs(pct) <= s.within * 100) return undefined;
+  return pct < 0 ? 'early' : 'late';
 }
 
 // A pedalled span, like a note: the Ped. sign on the timing ramp (when the
@@ -119,8 +130,8 @@ export function colorFor(n: PlayedNote, s: ReviewSettings, c: Context): string {
 const pedalTimingPos = (p: PlayedPedal, s: ReviewSettings, c: Context) => (timingScale(pedalTiming(p, c).pct, s) + 1) / 2;
 const pedalHeldPos = (p: PlayedPedal, s: ReviewSettings) => p.durationPct! / s.durationMax;
 export const pedalColor = (p: PlayedPedal, sign: 'down' | 'up', s: ReviewSettings, c: Context) => {
-  if (sign === 'down') return p.deltaMs === undefined ? NOT_MEASURED : ramp(TIMING_RAMP, pedalTimingPos(p, s, c));
-  return p.durationPct === undefined ? NOT_MEASURED : ramp(DURATION_RAMP, pedalHeldPos(p, s));
+  if (sign === 'down') return p.deltaMs === undefined ? NOT_MEASURED : ramp(RAMP, pedalTimingPos(p, s, c));
+  return p.durationPct === undefined ? NOT_MEASURED : ramp(RAMP, pedalHeldPos(p, s));
 };
 
 // Every played note, positioned on the same [0, 1] axis as the layer's ramp:
@@ -140,14 +151,12 @@ function distribution(a: Alignment, s: ReviewSettings, c: Context): DistRow[] {
 
 const signed = (x: number, digits = 0) => `${x > 0 ? '+' : x < 0 ? '−' : '±'}${Math.abs(x).toFixed(digits)}`;
 
-// The layer's ramps, each with its strip plot above it: none for "notes", two
-// for "pedal" (down timing, held duration), one for the others.
+// The layer's ramps, each with its strip plot above it: two for "pedal" (down
+// timing, held duration), one for the others.
 export type Panel = { legend: Legend; rows: DistRow[] };
 
 export function panels(a: Alignment, s: ReviewSettings, c: Context): Panel[] {
   switch (s.layer) {
-    case 'notes':
-      return [];
     case 'pedal': {
       const pos = (f: (p: PlayedPedal) => number | undefined) =>
         a.pedals.flatMap((p) => { const x = f(p); return x === undefined ? [] : [clamp01(x)]; });
@@ -156,6 +165,8 @@ export function panels(a: Alignment, s: ReviewSettings, c: Context): Panel[] {
         { legend: legend('duration', s, c), rows: [{ label: 'held', xs: pos((p) => (p.durationPct === undefined ? undefined : pedalHeldPos(p, s))) }] },
       ];
     }
+    case 'notes':
+      return [{ legend: legend('timing', s, c), rows: distribution(a, s, c) }];
     default:
       return [{ legend: legend(s.layer, s, c), rows: distribution(a, s, c) }];
   }
@@ -164,10 +175,11 @@ export function panels(a: Alignment, s: ReviewSettings, c: Context): Panel[] {
 function legend(layer: 'timing' | 'duration' | 'velocity', s: ReviewSettings, c: Context): Legend {
   switch (layer) {
     case 'timing': {
-      const r = s.maxOffsetBeats * 100;
-      const values = s.timingLog ? [-r, -r / 5, 0, r / 5, r] : [-r, -r / 2, 0, r / 2, r];
+      const r = windowOf(s) * 100, w = s.within * 100;
+      const values = [-r, -w, 0, w, r];
       return {
-        gradient: `linear-gradient(in oklab to right, ${TIMING_RAMP.join(', ')})`,
+        gradient: GRADIENT,
+        marks: [-w, w].map((v) => (timingScale(v, s) + 1) / 2),
         // In % of a beat, also say how many ms that is at this speed.
         ticks: values.map((v) => {
           const ms = c.beatMs ? `\n${Math.round((Math.abs(v) / 100) * c.beatMs)} ms` : '';
@@ -179,12 +191,12 @@ function legend(layer: 'timing' | 'duration' | 'velocity', s: ReviewSettings, c:
       const step = s.durationMax > 150 ? 50 : 25;
       const ticks = [];
       for (let v = 0; v <= s.durationMax; v += step) ticks.push({ at: v / s.durationMax, label: `${v} %` });
-      return { gradient: `linear-gradient(in oklab to right, ${DURATION_RAMP.join(', ')})`, ticks };
+      return { gradient: GRADIENT, ticks };
     }
     case 'velocity': {
       const { velocityLo: lo, velocityHi: hi } = c;
       const ticks = [0, 0.25, 0.5, 0.75, 1].map((at) => ({ at, label: `${Math.round(lo + (hi - lo) * at)} %` }));
-      return { gradient: `linear-gradient(in oklab to right, ${VELOCITY_RAMP.join(', ')})`, ticks };
+      return { gradient: GRADIENT, ticks };
     }
   }
 }
@@ -208,27 +220,41 @@ function offsetPart(s: ReviewSettings, c: Context): string[] {
   return [`${s.recenter ? 're-centered on' : 'run offset'} ${pct}(${signed(Math.round(ms))} ms)`];
 }
 
+const withinLabel = (s: ReviewSettings) => `within ±${Math.round(s.within * 100)} %`;
+
+// Counted over every note in the report, missed ones included: the match
+// window is wider than the criterion, so "within" is not already a given.
+export function counts(a: Alignment, s: ReviewSettings, c: Context) {
+  let within = 0, early = 0, late = 0, missed = 0;
+  for (const n of a.notes) {
+    if (n.status !== 'played') { missed++; continue; }
+    const o = outside(n, s, c);
+    if (o === 'early') early++;
+    else if (o === 'late') late++;
+    else within++;
+  }
+  return { within, early, late, missed, total: a.notes.length };
+}
+
 export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
   const played = a.notes.filter((n) => n.status === 'played');
   switch (s.layer) {
     case 'notes': {
-      const missed = a.notes.length - played.length;
+      const k = counts(a, s, c);
       const wrong = a.notes.filter((n) => n.wrongPitch !== undefined).length;
       const extras = a.extras.filter((x) => !x.wrongFor).length;
-      return [
-        `${played.length} / ${a.notes.length} played`, `${missed} missed${wrong ? ` (${wrong} wrong key)` : ''}`,
-        `${extras} extra`, ...offsetPart(s, c),
-      ].join(' · ');
-    }
-    case 'timing': {
-      if (!played.length) return 'nothing played';
+      const parts = [
+        `${k.within} / ${k.total} ${withinLabel(s)}`, `${k.early} early`, `${k.late} late`,
+        `${k.missed} missed${wrong ? ` (${wrong} wrong key)` : ''}`, `${extras} extra`,
+      ];
+      if (!played.length) return [...parts, ...offsetPart(s, c)].join(' · ');
       const fmt = (ns: PlayedNote[]) => {
         const t = ns.map((n) => timing(n, c));
         return `${signed(quantile(t.map((x) => x.pct), 0.5))} % (${signed(quantile(t.map((x) => x.ms), 0.5))} ms)`;
       };
       const rh = played.filter((n) => n.expected.staff === 1);
       const lh = played.filter((n) => n.expected.staff === 2);
-      const parts = [`median ${fmt(played)}`];
+      parts.push(`median ${fmt(played)}`);
       if (rh.length && lh.length) parts.push(`RH ${fmt(rh)}`, `LH ${fmt(lh)}`);
       if (c.beatMs) parts.push(`1 beat = ${Math.round(c.beatMs)} ms`);
       return [...parts, ...offsetPart(s, c)].join(' · ');
@@ -243,6 +269,7 @@ export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
       const t = down.map((p) => pedalTiming(p, c));
       const held = down.flatMap((p) => (p.durationPct === undefined ? [] : [p.durationPct]));
       const parts = [`down ${down.length} / ${a.pedals.length}`];
+      if (t.length) parts.push(`${t.filter((x) => Math.abs(x.pct) <= s.within * 100).length} ${withinLabel(s)}`);
       if (t.length) parts.push(`median ${signed(quantile(t.map((x) => x.pct), 0.5))} % (${signed(quantile(t.map((x) => x.ms), 0.5))} ms)`);
       if (held.length) parts.push(`held median ${quantile(held, 0.5).toFixed(0)} %`);
       parts.push(`${a.pedalExtras.length} extra`);
@@ -257,7 +284,7 @@ const NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A�
 export const pitchName = (p: number) => `${NAMES[p % 12]}${Math.floor(p / 12) - 1}`;
 
 // Everything about one note at once, for the tap popover.
-export function describe(n: PlayedNote, c: Context): string {
+export function describe(n: PlayedNote, s: ReviewSettings, c: Context): string {
   const name = pitchName(n.expected.pitch);
   if (n.status !== 'played') {
     return n.wrongPitch !== undefined ? `${name} · missed (played ${pitchName(n.wrongPitch)})` : `${name} · missed`;
@@ -270,6 +297,8 @@ export function describe(n: PlayedNote, c: Context): string {
     `vel ${n.velocity} (${n.velocityPct!.toFixed(0)} %)`,
   ];
   if (n.pedal) parts.push('pedal');
+  const o = outside(n, s, c);
+  if (o) parts.push(`outside ±${Math.round(s.within * 100)} % (${o})`);
   return parts.join(' · ');
 }
 

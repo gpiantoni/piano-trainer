@@ -7,7 +7,7 @@
   --accent: #16a34a;
   --muted-note: #c4c0bc;
   --cursor: #ea580c;
-  --pedal: #0ea5e9;
+  --pedal: #c026d3;           /* not on the review ramp, so the ring shows on any notehead */
   --wrong: #dc2626;
   --line: color-mix(in srgb, var(--fg) 15%, transparent);
 }
@@ -173,6 +173,15 @@ body.reviewing { padding-bottom: calc(var(--strip-h, 8.5rem) + 1rem); }
   background: var(--fg);
   opacity: .3;
 }
+/* The timing criterion's edges, across the ramp. */
+.ramp .crit {
+  position: absolute;
+  top: -.2rem;
+  bottom: -.2rem;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--fg);
+}
 .ramp span {
   position: absolute;
   top: 1rem;
@@ -186,11 +195,10 @@ body.reviewing { padding-bottom: calc(var(--strip-h, 8.5rem) + 1rem); }
 }
 .key-legend { color: var(--muted); display: flex; align-items: center; gap: .35rem; }
 .k { display: inline-block; width: .8rem; height: .8rem; border-radius: 50%; margin-left: .4rem; }
-.k.played { background: #16a34a; }
-.k.missed { background: #dc2626; }
 .k.ring { border: 3px solid var(--pedal); }
 .k.unmoved { background: var(--muted-note); }
 .k-x { color: #dc2626; font-size: 1.1rem; margin-left: .4rem; }
+.k-arrow { color: var(--wrong); margin-left: .4rem; }
 
 .extra {
   position: absolute;
@@ -206,6 +214,21 @@ body.reviewing { padding-bottom: calc(var(--strip-h, 8.5rem) + 1rem); }
   cursor: pointer;
 }
 .extra.below { top: .3rem; }
+
+/* Outside the timing criterion: an arrow just beside the notehead, the way it
+   was off. Positioned at the notehead's edge, vertically centred; taps pass
+   through to the note. */
+.off {
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--wrong);
+  font: 700 1.1rem/1 system-ui, sans-serif;
+  pointer-events: none;
+  margin-top: -.55rem;
+}
+.off.early { margin-left: -1rem; }
+.off.late { margin-left: .1rem; }
 
 .popover {
   position: absolute;

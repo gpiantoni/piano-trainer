@@ -9,7 +9,7 @@ import { TempoRun } from './engine/tempoRun.ts';
 import { align, runOffset } from './engine/align.ts';
 import { CALIBRATION, estimateLatency } from './engine/calibration.ts';
 import { ReviewView } from './review/view.ts';
-import { MATCH_WINDOWS } from './review/palettes.ts';
+import { WIDEST_WINDOW } from './review/palettes.ts';
 import type { Hands, NoteEvent } from './types.ts';
 import { getScore, listScores } from './library/db.ts';
 import { LibraryDialog } from './library/dialog.ts';
@@ -449,10 +449,11 @@ function finishRun() {
 // from the run, not from the chosen window.
 function analyse() {
   if (!lastRun || !timing) return;
-  const { maxOffsetBeats, recenter } = review.settings;
+  const { recenter } = review.settings;
+  const maxOffsetBeats = review.window;
   const { recording, speed: runSpeed, untilMs, window } = lastRun;
   const base = { hands, untilMs, window };
-  const widest = Math.max(...MATCH_WINDOWS);
+  const widest = WIDEST_WINDOW;
   const wide = align(timing.events, recording, runSpeed, { ...base, maxOffsetBeats: widest }, timing.pedals);
   const offset = runOffset(wide);
   const biasMs = recenter ? offset.ms ?? 0 : 0;

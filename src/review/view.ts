@@ -2,10 +2,10 @@ import { OFFSET_MIN_NOTES, type Alignment } from '../engine/align.ts';
 import type { CursorMap } from '../score/cursor.ts';
 import type { PlayedNote, PlayedPedal } from '../types.ts';
 import {
-  DEFAULT_SETTINGS, colorFor, context, describe, describePedal, panels, pedalColor, pitchName, summary,
-  type Layer, type Offset, type ReviewSettings,
+  DEFAULT_SETTINGS, colorFor, context, describe, describePedal, outside, panels, pedalColor, pitchName, summary,
+  windowOf, type Layer, type Offset, type ReviewSettings,
 } from './layers.ts';
-import { DURATION_RANGES, MATCH_WINDOWS } from './palettes.ts';
+import { DURATION_RANGES, TIMING_CRITERIA } from './palettes.ts';
 
 // After a tempo run: colour the noteheads by the chosen layer, with a legend
 // strip at the bottom, and show all numbers for a tapped note.
@@ -13,7 +13,7 @@ import { DURATION_RANGES, MATCH_WINDOWS } from './palettes.ts';
 const TAP_REACH_PX = 28;
 
 const LAYERS: [Layer, string][] = [
-  ['notes', 'Notes'], ['timing', 'Timing'], ['duration', 'Duration'], ['velocity', 'Velocity'], ['pedal', 'Pedal'],
+  ['notes', 'Notes'], ['duration', 'Duration'], ['velocity', 'Velocity'], ['pedal', 'Pedal'],
 ];
 
 type Options = {
@@ -21,7 +21,7 @@ type Options = {
   strip: HTMLElement;
   load: () => Partial<ReviewSettings>;
   save: (s: ReviewSettings) => void;
-  realign: () => void;           // match window or re-center changed
+  realign: () => void;           // criterion (so match window) or re-center changed
   download: () => void;
 };
 
@@ -62,9 +62,12 @@ export class ReviewView {
 
   constructor(opts: Options) {
     this.opts = opts;
-    this.settings = { ...DEFAULT_SETTINGS, ...opts.load() };
-    // Saved from before the current steps: back to the default.
-    if (!MATCH_WINDOWS.includes(this.settings.maxOffsetBeats)) this.settings.maxOffsetBeats = DEFAULT_SETTINGS.maxOffsetBeats;
+    // From before Notes and Timing were one layer, and the criterion replaced the match window.
+    const saved: Record<string, unknown> = { ...opts.load() };
+    if (saved.layer === 'timing') saved.layer = 'notes';
+    delete saved.maxOffsetBeats;
+    this.settings = { ...DEFAULT_SETTINGS, ...(saved as Partial<ReviewSettings>) };
+    if (!TIMING_CRITERIA.some((t) => t.within === this.settings.within)) this.settings.within = DEFAULT_SETTINGS.within;
     opts.score.addEventListener('click', (e) => this.onTap(e));
     document.addEventListener('click', (e) => {
       if (!opts.score.contains(e.target as Node)) this.popover.hidden = true;
@@ -75,6 +78,8 @@ export class ReviewView {
   }
 
   get active() { return !!this.alignment; }
+  // × beat: how far off a key may be and still count as that note.
+  get window() { return windowOf(this.settings); }
 
   show(alignment: Alignment, speed: number, offset: Offset) {
     this.alignment = alignment;
@@ -109,7 +114,7 @@ export class ReviewView {
   }
 
   private set(patch: Partial<ReviewSettings>) {
-    const realign = ('maxOffsetBeats' in patch && patch.maxOffsetBeats !== this.settings.maxOffsetBeats)
+    const realign = ('within' in patch && patch.within !== this.settings.within)
       || ('recenter' in patch && patch.recenter !== this.settings.recenter);
     this.settings = { ...this.settings, ...patch };
     this.opts.save(this.settings);
@@ -169,6 +174,21 @@ export class ReviewView {
       return;
     }
     if (s.layer !== 'notes') return;
+    // Outside the criterion: a red arrow beside the notehead, pointing the way it was off.
+    const base = this.opts.score.getBoundingClientRect();
+    for (const n of a.notes) {
+      const o = outside(n, s, c!);
+      const head = o && this.noteEls.get(n.expected.id);
+      if (!head) continue;
+      const r = (head.querySelector('.notehead') ?? head).getBoundingClientRect();
+      const m = document.createElement('span');
+      m.className = `off ${o}`;
+      m.textContent = o === 'early' ? '◂' : '▸';
+      const x = o === 'early' ? r.left - base.left : r.right - base.left;
+      m.style.transform = `translate(${x}px, ${r.top - base.top + r.height / 2}px)`;
+      this.opts.score.append(m);
+      this.markers.push(m);
+    }
     for (const x of a.extras) {
       if (x.wrongFor) continue;
       const pos = this.cursorMap.position(Math.max(0, x.onsetMs * this.speed));
@@ -241,6 +261,12 @@ export class ReviewView {
       const bar = document.createElement('div');
       bar.className = 'ramp';
       bar.style.setProperty('--ramp', lg.gradient);
+      for (const at of lg.marks ?? []) {
+        const mark = document.createElement('b');
+        mark.className = 'crit';
+        mark.style.left = `${at * 100}%`;
+        bar.append(mark);
+      }
       for (const t of lg.ticks) {
         const tick = document.createElement('span');
         tick.style.left = `${t.at * 100}%`;
@@ -251,31 +277,27 @@ export class ReviewView {
       bottom.append(wrap);
     }
 
-    const matchWindow = segment('match window ±', ...MATCH_WINDOWS.map((w) =>
-      button(`${Math.round(w * 100)} %`, s.maxOffsetBeats === w, () => this.set({ maxOffsetBeats: w }),
-        'How far off a key may be and still count as that note, as % of a beat; also the timing colour range')));
+    const pct = (x: number) => `${Math.round(x * 100)} %`;
+    const criterion = segment('within ±', ...TIMING_CRITERIA.map(({ within, window }) =>
+      button(pct(within), s.within === within, () => this.set({ within }),
+        `Timing criterion, as % of a beat: further off gets a red arrow. Colours and match window reach ±${pct(window)}`)));
     const durationRange = segment('range 0–', ...DURATION_RANGES.map((r) =>
       button(`${r} %`, s.durationMax === r, () => this.set({ durationMax: r }))));
     switch (s.layer) {
       case 'notes':
         bottom.append(
-          matchWindow,
+          criterion,
+          segment('', button('log', s.timingLog, () => this.set({ timingLog: !s.timingLog }), 'Logarithmic: small and large offsets both visible')),
           Object.assign(document.createElement('span'), {
             className: 'key-legend',
-            innerHTML: '<i class="k played"></i>played <i class="k missed"></i>missed <b class="k-x">×</b> extra key',
+            innerHTML: `<b class="k-arrow">◂ ▸</b> outside ±${pct(s.within)} <i class="k unmoved"></i>missed <b class="k-x">×</b> extra key`,
           }),
         );
         break;
       case 'pedal':
-        bottom.append(matchWindow, durationRange, Object.assign(document.createElement('span'), {
+        bottom.append(criterion, durationRange, Object.assign(document.createElement('span'), {
           className: 'key-legend', innerHTML: '<i class="k unmoved"></i>pedal didn\'t go down <b class="k-x">×</b> extra pedal',
         }));
-        break;
-      case 'timing':
-        bottom.append(
-          matchWindow,
-          segment('', button('log', s.timingLog, () => this.set({ timingLog: !s.timingLog }), 'Logarithmic: small and large offsets both visible')),
-        );
         break;
       case 'duration':
         bottom.append(durationRange,
@@ -309,7 +331,7 @@ export class ReviewView {
     } else {
       for (const [id, el] of this.noteEls) {
         const n = this.byNoteId.get(id);
-        if (n) consider(el, () => describe(n, c));
+        if (n) consider(el, () => describe(n, this.shown, c));
       }
     }
     if (!best) { this.popover.hidden = true; return; }
