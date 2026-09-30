@@ -524,7 +524,7 @@ function setSubdivide(on: boolean) {
   store.set('subdivide', on ? 'on' : 'off');
   subdivideButton.setAttribute('aria-checked', String(on));
   subdivideButton.textContent = on ? '♫' : '♩';
-  subdivideButton.title = on ? 'Eighth-note click on ("1 and 2 and")' : 'Eighth-note click off';
+  subdivideButton.title = on ? 'Eighth-note click on' : 'Eighth-note click off';
 }
 subdivideButton.onclick = () => setSubdivide(!metronome.subdivide);
 setClick(metronome.enabled);

@@ -32,6 +32,9 @@ const EPS = 1e-6;
 const compound = (m: Meter) => m.unit >= 8 && m.count > 3 && m.count % 3 === 0;
 export const beatQ = (m: Meter) => (compound(m) ? 3 : 1) * (4 / m.unit);
 export const beatsPerBar = (m: Meter) => (compound(m) ? m.count / 3 : m.count);
+// Clicks per beat with subdivision on: "1 and" in simple meters, every eighth
+// ("1 2 3") in compound ones.
+export const subsPerBeat = (m: Meter) => (compound(m) ? 3 : 2);
 
 // measure id -> printed bar number.
 export function measureNumbers(mei: string): Map<string, string> {
@@ -128,18 +131,20 @@ export function buildBeats(measures: Measure[], map: TimemapEntry[]): Beat[] {
   return beats;
 }
 
-// Halfway points between each main beat ("...and...") for both count-in and
-// play, so the metronome can tick "1 and 2 and" like a teacher counting aloud.
+// The clicks between main beats, so the metronome can count like a teacher
+// aloud: "1 and 2 and" in simple meters, "1 2 3 4 5 6" (every eighth) in 6/8.
 export function buildSubdivisions(measures: Measure[], map: TimemapEntry[]): number[] {
   const toMs = qToMs(map);
   const qs: number[] = [];
   measures.forEach((m, i) => {
-    const step = beatQ(m.meter);
-    const off = step / 2;
+    const n = subsPerBeat(m.meter);
+    const sub = beatQ(m.meter) / n;
+    // Every k-th sub step is a beat, not a subdivision. A pickup holds the *last*
+    // part of a full bar, so count it back from its end.
     if (i === 0 && isPickup(measures)) {
-      for (let q = m.endQ - off; q >= m.startQ - EPS; q -= step) qs.unshift(q);
+      for (let k = 1; m.endQ - k * sub >= m.startQ - EPS; k++) if (k % n) qs.unshift(m.endQ - k * sub);
     } else {
-      for (let q = m.startQ + off; q < m.endQ - EPS; q += step) qs.push(q);
+      for (let k = 1; m.startQ + k * sub < m.endQ - EPS; k++) if (k % n) qs.push(m.startQ + k * sub);
     }
   });
   return qs.map(toMs);
@@ -148,7 +153,7 @@ export function buildSubdivisions(measures: Measure[], map: TimemapEntry[]): num
 // Count-in clicks before the first beat: one full bar, plus the beats a pickup
 // bar is missing, so the first note falls where the ear expects it. Offsets are
 // score ms at 1.0× (negative, before the first beat); divide by speed for real ms.
-// A subdivision click ("and") follows each beat, halfway to the next.
+// Subdivision clicks follow each beat, as in play.
 export function countIn(measures: Measure[], beats: Beat[], map: TimemapEntry[]): { t: number; accent: boolean; sub?: boolean }[] {
   const first = measures[0];
   if (!first || beats.length === 0) return [];
@@ -157,10 +162,11 @@ export function countIn(measures: Measure[], beats: Beat[], map: TimemapEntry[])
   const n = perBar + (inPickup ? perBar - inPickup : 0);
   const toMs = qToMs(map);
   const beatMs = toMs(first.startQ + beatQ(first.meter)) - toMs(first.startQ);
+  const subs = subsPerBeat(first.meter);
   const out: { t: number; accent: boolean; sub?: boolean }[] = [];
   for (let k = n; k >= 1; k--) {
     out.push({ t: beats[0].t - k * beatMs, accent: (n - k) % perBar === 0 });
-    out.push({ t: beats[0].t - k * beatMs + beatMs / 2, accent: false, sub: true });
+    for (let j = 1; j < subs; j++) out.push({ t: beats[0].t - k * beatMs + (j * beatMs) / subs, accent: false, sub: true });
   }
   return out;
 }

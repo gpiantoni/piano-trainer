@@ -10,7 +10,7 @@ export type ScoreTiming = {
   events: ExpectedEvent[];
   measures: Measure[];
   beats: Beat[];
-  subdivisions: number[];                     // "and" ticks halfway between beats
+  subdivisions: number[];                     // ticks between beats ("and", or eighths in 6/8)
   countIn: { t: number; accent: boolean; sub?: boolean }[];   // before score time 0, 1.0× ms
   onsets: { t: number; ids: string[] }[];     // notes and rests starting together: cursor anchors
   pedals: PedalMark[];                        // in time order; up before down at the same time

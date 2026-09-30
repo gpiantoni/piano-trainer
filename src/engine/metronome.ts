@@ -6,7 +6,7 @@ export type Click = {
   at: number;          // performance.now() ms at which the click should be *heard*
   accent: boolean;
   always: boolean;     // count-in clicks sound even with the metronome switched off
-  sub?: boolean;       // an "and": halfway between two beats, in its own sound
+  sub?: boolean;       // a subdivision between two beats, in its own sound
 };
 
 const LOOKAHEAD_S = 0.12;
@@ -21,7 +21,7 @@ const BELL = [
 
 export class Metronome {
   enabled = true;
-  subdivide = false;   // click the "and" halfway between beats too
+  subdivide = false;   // click the subdivisions between beats too
   volume = 1;
   private ctx: AudioContext | undefined;
   private timer: number | undefined;
