@@ -15,54 +15,65 @@ import { getScore, listScores } from './library/db.ts';
 import { LibraryDialog } from './library/dialog.ts';
 import {
   formatSection, inWindow, parseSection, playWindow, sectionFrom, sectionLabel,
-  type PlayWindow, type Section,
+  type Click, type PlayWindow, type Section,
 } from './score/section.ts';
 import { lastAtOrBefore } from './score/beats.ts';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
   <header class="bar">
-    <select id="picker" aria-label="Score"></select>
-    <button id="library">Library</button>
-    <div class="zoom" role="group" aria-label="Notation size">
-      <button id="zoomOut" aria-label="Smaller">−</button>
-      <output id="zoomLevel"></output>
-      <button id="zoomIn" aria-label="Larger">+</button>
-    </div>
-    <div class="seg" id="modes" role="radiogroup" aria-label="Mode">
-      <button data-mode="wait" role="radio">Wait</button>
-      <button data-mode="tempo" role="radio">Tempo</button>
-    </div>
-    <div class="seg" id="hands" role="radiogroup" aria-label="Hands">
-      <button data-hands="both" role="radio">Both</button>
-      <button data-hands="left" role="radio">Left</button>
-      <button data-hands="right" role="radio">Right</button>
-    </div>
-    <span class="group">
-      <button id="bars" title="Practise some bars: tap the first bar, then the last">Bars</button>
-      <button id="barsClear" aria-label="Whole piece" title="Whole piece" hidden>✕</button>
-    </span>
-    <span id="waitControls" class="group">
-      <button id="restart">Restart</button>
-    </span>
-    <span id="tempoControls" class="group" hidden>
-      <span class="zoom" role="group" aria-label="Speed">
-        <button id="slower" aria-label="Slower">−</button>
-        <output id="speed" class="speed"></output>
-        <button id="faster" aria-label="Faster">+</button>
+    <div class="row">
+      <span class="group l">
+        <select id="picker" aria-label="Score"></select>
+        <button id="library">Library</button>
       </span>
-      <button id="click" role="switch" aria-label="Metronome">🔔</button>
-      <button id="subdivide" role="switch" aria-label="Eighth-note click">♩</button>
-      <button id="latency" title="Latency calibration">⏱ 0 ms</button>
-      <button id="startStop" class="primary">Start</button>
-    </span>
-    <span id="progress" class="progress"></span>
-    <span id="feedback" class="feedback" aria-live="polite"></span>
-    <span class="end">
-      <button id="fullscreen" hidden>Full screen</button>
-      <span id="midi" class="midi"></span>
-      <a class="debug" href="${import.meta.env.BASE_URL}spike.html">MIDI debugger</a>
-    </span>
+      <span class="group m">
+        <div class="seg" id="modes" role="radiogroup" aria-label="Mode">
+          <button data-mode="wait" role="radio">Wait</button>
+          <button data-mode="tempo" role="radio">Tempo</button>
+        </div>
+        <div class="seg" id="hands" role="radiogroup" aria-label="Hands">
+          <button data-hands="both" role="radio">Both</button>
+          <button data-hands="left" role="radio">Left</button>
+          <button data-hands="right" role="radio">Right</button>
+        </div>
+        <span class="group">
+          <button id="bars" title="Practise some bars: tap the first bar, then the last">Bars</button>
+          <button id="barsClear" aria-label="Whole piece" title="Whole piece" hidden>✕</button>
+        </span>
+      </span>
+      <span class="group r">
+        <button id="fullscreen" hidden>Full screen</button>
+        <div class="zoom" role="group" aria-label="Notation size">
+          <button id="zoomOut" aria-label="Smaller">−</button>
+          <output id="zoomLevel"></output>
+          <button id="zoomIn" aria-label="Larger">+</button>
+        </div>
+        <span id="midi" class="midi"></span>
+      </span>
+    </div>
+    <div class="row">
+      <span class="group l">
+        <span id="tempoControls" class="group" hidden>
+          <span class="zoom" role="group" aria-label="Speed">
+            <button id="slower" aria-label="Slower">−</button>
+            <output id="speed" class="speed"></output>
+            <button id="faster" aria-label="Faster">+</button>
+          </span>
+          <button id="click" role="switch" aria-label="Metronome">🔔</button>
+          <button id="subdivide" role="switch" aria-label="Eighth-note click">♩</button>
+          <button id="latency" title="Latency calibration">⏱ 0 ms</button>
+        </span>
+      </span>
+      <span class="m">
+        <span id="count" class="count" aria-hidden="true"></span>
+        <span id="progress" class="progress"></span>
+      </span>
+      <span class="group r">
+        <button id="restart">Restart</button>
+        <button id="startStop" class="primary" hidden>Start</button>
+      </span>
+    </div>
   </header>
   <p id="status" class="status"></p>
   <p id="barsHint" class="status hint" aria-live="polite" hidden></p>
@@ -88,7 +99,6 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const picker = $<HTMLSelectElement>('picker');
 const status = $('status');
 const score = $('score');
-const feedback = $('feedback');
 const waitFeedback = $('waitFeedback');
 const startStop = $<HTMLButtonElement>('startStop');
 
@@ -170,6 +180,7 @@ function paint() {
   $('progress').textContent = mode !== 'wait' || !practice ? ''
     : practice.done ? `Done · ${practice.wrong} wrong`
     : `${practice.cursor} / ${practice.chords.length} played · ${practice.wrong} wrong`;
+  drawCount();
 }
 
 // Bring a line of music to just below the sticky bar. Only when the line
@@ -189,11 +200,6 @@ function follow(force = false) {
   }
   const ev = practice?.current?.events[0];
   scrollToSystem(ev ? noteEls.get(ev.id)?.closest('g.system') ?? null : null, force);
-}
-
-function clearFeedback() {
-  feedback.textContent = '';
-  feedback.className = 'feedback';
 }
 
 // Wait mode's own feedback line, below the title — not the sticky header bar,
@@ -382,12 +388,32 @@ function drawCursor(scoreMs: number) {
   placeOverMeasure(cursor, i >= 0 ? timing!.measures[i] : undefined);
 }
 
+// The count-in as a fixed row of beat numbers, with the eighths between them
+// as dots while the eighth-note click is on. The click just heard lights up, so
+// nothing shifts; before a run the row shows how long the count-in will be.
+const count = $('count');
+let countClicks: Click[] = [];
+
+function drawCount() {
+  const clicks = mode === 'tempo' && timing ? playWindow(timing, section).countIn : [];
+  countClicks = clicks.filter((c) => !c.sub || metronome.subdivide).sort((a, b) => a.t - b.t);
+  let beat = 0;
+  count.replaceChildren(...countClicks.map((c) => Object.assign(document.createElement('span'),
+    c.sub ? { className: 'sub' } : { textContent: String(++beat) })));
+  lightCount(undefined);
+}
+
+// `i`: the click just heard (-1 before the first); undefined outside a count-in.
+function lightCount(i: number | undefined) {
+  count.classList.toggle('live', i !== undefined);
+  [...count.children].forEach((el, k) => el.classList.toggle('now', k === i));
+}
+
 let wakeLock: WakeLockSentinel | undefined;
 let frame = 0;
 
 async function startRun() {
   if (!timing || run) return;
-  clearFeedback();
   review.clear();
   lastRun = undefined;
   await metronome.prepare();          // inside the tap: audio may start
@@ -407,12 +433,7 @@ function tick() {
   if (phase === 'finished') return finishRun();
   const t = run.scoreTime(now);
   drawCursor(Math.max(run.window.startMs, t));
-  if (phase === 'countIn') {
-    feedback.textContent = `${run.countInNumber(now)}`;
-    feedback.className = 'feedback count';
-  } else if (feedback.classList.contains('count')) {
-    clearFeedback();
-  }
+  lightCount(phase === 'countIn' ? lastAtOrBefore(countClicks, now, (c) => run!.realAt(c.t)) : undefined);
   follow();
   frame = requestAnimationFrame(tick);
 }
@@ -427,7 +448,7 @@ function stopRun() {
   startStop.textContent = 'Start';
   startStop.classList.remove('running');
   cursor.hidden = true;
-  if (feedback.classList.contains('count')) clearFeedback();
+  lightCount(undefined);
 }
 
 function finishRun() {
@@ -525,6 +546,7 @@ function setSubdivide(on: boolean) {
   subdivideButton.setAttribute('aria-checked', String(on));
   subdivideButton.textContent = on ? '♫' : '♩';
   subdivideButton.title = on ? 'Eighth-note click on' : 'Eighth-note click off';
+  drawCount();
 }
 subdivideButton.onclick = () => setSubdivide(!metronome.subdivide);
 setClick(metronome.enabled);
@@ -620,8 +642,9 @@ function setMode(next: Mode) {
   mode = next;
   store.set('mode', mode);
   for (const b of modeButtons) b.setAttribute('aria-checked', String(b.dataset.mode === mode));
-  $('waitControls').hidden = mode !== 'wait';
+  $('restart').hidden = mode !== 'wait';
   $('tempoControls').hidden = mode !== 'tempo';
+  startStop.hidden = mode !== 'tempo';
   waitFeedback.hidden = mode !== 'wait';
   restart();
 }
@@ -697,7 +720,6 @@ async function show(entry: ScoreEntry) {
     showSection();
     practice = new WaitMode(practiceEvents(t), hands);
     setBpm(Number(store.get(`bpm:${entry.id}`)) || scoreBpm(timing));
-    clearFeedback();
     clearWaitFeedback();
     await layout(mine);
     // A resize may have re-flowed meanwhile; that still shows this score.
@@ -808,7 +830,7 @@ listenMidi(onNote, (s) => {
     : s.kind === 'denied' ? 'MIDI blocked'
     : s.inputs.length ? `🎹 ${s.inputs.join(', ')}`
     : 'No piano connected';
-  midi.title = s.kind === 'denied' ? s.message : '';
+  midi.title = s.kind === 'denied' ? s.message : midi.textContent;
 });
 
 // Dev only: play without a piano from the console.

@@ -26,13 +26,26 @@ body {
   position: sticky;
   top: 0;
   z-index: 1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: .75rem;
-  padding: .75rem max(1rem, env(safe-area-inset-left));
+  display: grid;
+  gap: .5rem;
+  padding: .6rem max(1rem, env(safe-area-inset-left));
   background: var(--bg);
   border-bottom: 1px solid var(--line);
+}
+/* Two rows of left · middle · right; the middle stays centred on the page. */
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: .75rem;
+}
+.row > .l { justify-self: start; }
+.row > .m { justify-self: center; display: flex; align-items: center; gap: .75rem; }
+.row > .r { justify-self: end; }
+/* Too narrow for three columns (phone, tablet portrait): wrap instead. */
+@media (max-width: 64rem) {
+  .row { display: flex; flex-wrap: wrap; }
+  .row > .r { margin-left: auto; }
 }
 .bar select, .bar button {
   font: inherit;
@@ -59,15 +72,29 @@ body {
 .bar button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); min-width: 5rem; }
 .bar button.primary.running { background: var(--wrong); border-color: var(--wrong); }
 #click { font-size: 1.2rem; }
-.feedback.count { font-size: 1.4rem; font-variant-numeric: tabular-nums; }
 .progress { color: var(--muted); font-size: .9rem; font-variant-numeric: tabular-nums; }
-.feedback { font-weight: 600; }
-.feedback.wrong { color: var(--wrong); }
-.feedback.good { color: var(--accent); }
-.end { margin-left: auto; display: flex; align-items: center; gap: .75rem; font-size: .9rem; }
+
+/* Count-in: every click in a fixed place, the one just heard filled in. */
+.count { display: flex; align-items: center; gap: .3rem; font-variant-numeric: tabular-nums; }
+.count span {
+  display: grid;
+  place-items: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 50%;
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--muted-note);
+}
+.count.live span { color: var(--muted); }
+.count span.now { background: var(--cursor); color: var(--bg); }
+/* An eighth: a small circle, filled the same way as a beat. */
+.count span.sub { width: .8rem; height: .8rem; border: 2px solid currentColor; background: none; }
+.count span.sub.now { border-color: var(--cursor); background: var(--cursor); }
+
+.midi { font-size: .8rem; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .midi.ok { color: var(--accent); }
 .midi.bad { color: var(--wrong); }
-.debug { color: var(--muted); }
 
 .status { margin: .5rem 1rem 0; color: var(--muted); font-size: .9rem; min-height: 1.6em; }
 
