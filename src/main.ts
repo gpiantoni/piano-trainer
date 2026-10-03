@@ -119,7 +119,7 @@ let scale = Number(store.get('scale')) || 45;
 // dotted quarter in 6/8), remembered per score. −/+ step to the next multiple
 // of BPM_STEP; the score's own tempo is the default. The engine takes `speed`,
 // the practice tempo as a fraction of the score's.
-const BPM_STEP = 5, BPM_MIN = 30, SPEED_MAX = 1.5;
+const BPM_STEP = 5, BPM_MIN = 10, SPEED_MAX = 1.5;
 let practiceBpm = 0;
 let speed = 1;
 
