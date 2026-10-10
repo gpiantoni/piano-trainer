@@ -65,7 +65,8 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   **✕** goes back to the whole piece.
 
   **Both / Left / Right** picks the hand in either mode: the other staff greys
-  out and is not asked for. **Full screen** hides the browser bars on the tablet.
+  out and is not asked for. **Full screen** hides the browser bars on the tablet
+  and keeps the screen awake, as a tempo run does while it plays.
 
   No piano at hand? In the dev console, `__play(67)` presses G4 and `__play(57, 60, 64)` a chord,
   `__practice().expected` lists what wait mode is waiting for, and

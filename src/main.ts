@@ -409,7 +409,23 @@ function lightCount(i: number | undefined) {
   [...count.children].forEach((el, k) => el.classList.toggle('now', k === i));
 }
 
-let wakeLock: WakeLockSentinel | undefined;
+// The screen stays on during a run and in full screen, where the tablet sits on
+// the stand untouched between runs and while wait mode waits. The browser drops
+// the lock whenever the page is hidden, so it is taken again on return.
+let wakeLock: Promise<WakeLockSentinel | undefined> | undefined;
+function keepAwake() {
+  const want = document.visibilityState === 'visible' && (run !== undefined || document.fullscreenElement !== null);
+  if (want && !wakeLock) {
+    const lock = navigator.wakeLock?.request('screen').catch(() => undefined);
+    wakeLock = lock;
+    lock?.then((s) => s?.addEventListener('release', () => { if (wakeLock === lock) wakeLock = undefined; }));
+  } else if (!want && wakeLock) {
+    wakeLock.then((s) => s?.release()).catch(() => undefined);
+    wakeLock = undefined;
+  }
+}
+document.addEventListener('visibilitychange', keepAwake);
+
 let frame = 0;
 
 async function startRun() {
@@ -420,7 +436,7 @@ async function startRun() {
   run = new TempoRun(timing, speed, latencyMs, playWindow(timing, section));
   metronome.play(run.clicks);
   followedSystem = null;
-  wakeLock = await navigator.wakeLock?.request('screen').catch(() => undefined);
+  keepAwake();
   startStop.textContent = 'Stop';
   startStop.classList.add('running');
   frame = requestAnimationFrame(tick);
@@ -443,8 +459,7 @@ function stopRun() {
   metronome.stop();
   run?.stop();
   run = undefined;
-  wakeLock?.release().catch(() => undefined);
-  wakeLock = undefined;
+  keepAwake();
   startStop.textContent = 'Start';
   startStop.classList.remove('running');
   cursor.hidden = true;
@@ -680,6 +695,7 @@ if (document.fullscreenEnabled) {
     : document.documentElement.requestFullscreen();
   document.addEventListener('fullscreenchange', () => {
     fullscreen.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
+    keepAwake();
   });
 }
 
