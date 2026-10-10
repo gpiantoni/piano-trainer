@@ -11,29 +11,37 @@ export type Click = {
 
 const LOOKAHEAD_S = 0.12;
 const TICK_MS = 25;
-const BEAT_HZ = 1175;
-const BELL_HZ = BEAT_HZ * 1.5;
+const BELL_HZ = 1762.5;
 const BELL = [
   { ratio: 1, amp: 1, decay: 0.35 },
   { ratio: 2.76, amp: 0.4, decay: 0.15 },
   { ratio: 5.4, amp: 0.2, decay: 0.08 },
 ];
+const WOOD_HZ = 800;
+const WOOD = [
+  { ratio: 1, amp: 0.65, decay: 0.18 },
+  { ratio: 2.48, amp: 0.2, decay: 0.07 },
+];
+const WOOD_PEAK = 0.9;
+const SUB_PEAK = WOOD_PEAK * 10 ** (-1 / 20);   // 1 dB below the beat
 
 export class Metronome {
   enabled = true;
   subdivide = false;   // click the subdivisions between beats too
   volume = 1;
   private ctx: AudioContext | undefined;
+  private noise: AudioBuffer | undefined;
   private timer: number | undefined;
   private queue: Click[] = [];
   private next = 0;
-  private sources: { oscs: OscillatorNode[]; end: number }[] = [];
+  private sources: { nodes: AudioScheduledSourceNode[]; end: number }[] = [];
   private toAudio = (ms: number) => ms / 1000;
 
   // Must be called from a user gesture (tap) the first time: autoplay rules.
   async prepare(): Promise<void> {
     this.ctx ??= new AudioContext({ latencyHint: 'interactive' });
     if (this.ctx.state !== 'running') await this.ctx.resume();
+    this.noise ??= whiteNoise(this.ctx, 0.5);
     this.syncClocks();
   }
 
@@ -49,7 +57,7 @@ export class Metronome {
   stop() {
     clearInterval(this.timer);
     this.timer = undefined;
-    for (const s of this.sources) for (const osc of s.oscs) { try { osc.stop(); } catch { /* already stopped */ } }
+    for (const s of this.sources) for (const node of s.nodes) { try { node.stop(); } catch { /* already stopped */ } }
     this.sources = [];
     this.queue = [];
   }
@@ -87,53 +95,83 @@ export class Metronome {
     if (this.next >= this.queue.length && this.sources.length === 0) clearInterval(this.timer);
   }
 
-  // Downbeat: a bell, so bar lines stand out by timbre, not just pitch. Beat and
-  // "and" are short ticks a fifth apart (the same interval the bell sits above the
-  // beat), stepping down in pitch and volume with their weight in the bar.
+  // Downbeat: a bell, so bar lines stand out by timbre, not just pitch. Beats
+  // are a wood block; the eighths a smaller, higher one, so they read as filling
+  // in between rather than as beats of their own.
   private click(at: number, accent: boolean, sub = false) {
     if (accent && !sub) this.bell(at);
-    else this.tick(at, sub ? BEAT_HZ / 1.5 : BEAT_HZ, this.volume * (sub ? 0.45 : 0.6));
+    else if (sub) this.wood(at, WOOD_HZ * 2, this.volume * SUB_PEAK, 0.6);
+    else this.wood(at, WOOD_HZ, this.volume * WOOD_PEAK);
   }
 
-  private tick(at: number, freq: number, peak: number) {
+  // Two inharmonic modes that drop slightly in pitch, as a struck block does,
+  // plus a few ms of filtered noise for the knock of the stick. `size` scales
+  // the ring: a smaller block dies away sooner.
+  private wood(at: number, freq: number, peak: number, size = 1) {
     const ctx = this.ctx!;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'square';
-    osc.frequency.value = freq;
-    const decay = 0.05;
-    gain.gain.setValueAtTime(0.0001, at);
-    gain.gain.exponentialRampToValueAtTime(peak, at + 0.002);
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + decay);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(at);
-    osc.stop(at + decay + 0.01);
-    this.sources.push({ oscs: [osc], end: at + decay + 0.01 });
+    const out = ctx.createGain();
+    out.gain.value = peak;
+    out.connect(ctx.destination);
+    const nodes: AudioScheduledSourceNode[] = [];
+    let end = at;
+    for (const m of WOOD) {
+      const osc = ctx.createOscillator();
+      const f = freq * m.ratio;
+      osc.frequency.setValueAtTime(f * 1.04, at);
+      osc.frequency.exponentialRampToValueAtTime(f, at + 0.012);
+      osc.connect(envelope(ctx, at, m.amp, m.decay * size)).connect(out);
+      osc.start(at);
+      osc.stop(at + m.decay * size + 0.01);
+      nodes.push(osc);
+      end = Math.max(end, at + m.decay * size + 0.01);
+    }
+    const knock = ctx.createBufferSource();
+    knock.buffer = this.noise!;
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.value = freq * 4;
+    knock.connect(band).connect(envelope(ctx, at, 0.5, 0.012, 0.001)).connect(out);
+    knock.start(at, Math.random() * 0.4);
+    knock.stop(at + 0.02);
+    nodes.push(knock);
+    this.sources.push({ nodes, end });
   }
 
   // Sine partials at inharmonic ratios, as in a small bell; the upper ones die
   // away faster, which is what makes it ring rather than buzz. The attack is as
-  // sharp as a tick's, so it marks the beat just as precisely.
+  // sharp as the wood block's, so it marks the beat just as precisely.
   private bell(at: number) {
     const ctx = this.ctx!;
     const out = ctx.createGain();
     out.gain.value = this.volume / BELL.reduce((sum, p) => sum + p.amp, 0);
     out.connect(ctx.destination);
-    const oscs: OscillatorNode[] = [];
+    const nodes: OscillatorNode[] = [];
     let end = at;
     for (const p of BELL) {
       const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
       osc.frequency.value = BELL_HZ * p.ratio;
-      gain.gain.setValueAtTime(0.0001, at);
-      gain.gain.exponentialRampToValueAtTime(p.amp, at + 0.002);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + p.decay);
-      osc.connect(gain).connect(out);
+      osc.connect(envelope(ctx, at, p.amp, p.decay)).connect(out);
       osc.start(at);
       osc.stop(at + p.decay + 0.01);
-      oscs.push(osc);
+      nodes.push(osc);
       end = Math.max(end, at + p.decay + 0.01);
     }
-    this.sources.push({ oscs, end });
+    this.sources.push({ nodes, end });
   }
+}
+
+// A percussive gain: a sharp attack, then an exponential fall to silence.
+function envelope(ctx: AudioContext, at: number, peak: number, decay: number, attack = 0.002): GainNode {
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, at);
+  gain.gain.exponentialRampToValueAtTime(peak, at + attack);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + decay);
+  return gain;
+}
+
+function whiteNoise(ctx: AudioContext, seconds: number): AudioBuffer {
+  const buf = ctx.createBuffer(1, Math.round(ctx.sampleRate * seconds), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  return buf;
 }
