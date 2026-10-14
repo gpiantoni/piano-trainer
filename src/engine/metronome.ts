@@ -54,6 +54,15 @@ export class Metronome {
     this.timer = window.setInterval(() => this.schedule(), TICK_MS);
   }
 
+  // Appends clicks later than any queued ones, for a metronome that runs until
+  // stopped: the caller keeps adding the next fraction of a second.
+  extend(clicks: Click[]) {
+    this.queue = [...this.queue.slice(this.next), ...clicks];
+    this.next = 0;
+    this.timer ??= window.setInterval(() => this.schedule(), TICK_MS);
+    this.schedule();
+  }
+
   stop() {
     clearInterval(this.timer);
     this.timer = undefined;
@@ -92,7 +101,10 @@ export class Metronome {
       this.click(Math.max(at, ctx.currentTime), click.accent, click.sub);
     }
     this.sources = this.sources.filter((s) => s.end > ctx.currentTime);
-    if (this.next >= this.queue.length && this.sources.length === 0) clearInterval(this.timer);
+    if (this.next >= this.queue.length && this.sources.length === 0) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+    }
   }
 
   // Downbeat: a bell, so bar lines stand out by timbre, not just pitch. Beats

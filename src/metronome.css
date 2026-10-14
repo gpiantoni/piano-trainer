@@ -1,0 +1,90 @@
+/* Light only, like the trainer. Sized for a phone held in one hand. */
+:root {
+  color-scheme: light;
+  --fg: #1c1917;
+  --bg: #fff;
+  --muted: #78716c;
+  --muted-note: #c4c0bc;
+  --cursor: #ea580c;
+  --wrong: #dc2626;
+  --line: color-mix(in srgb, var(--fg) 15%, transparent);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 16px/1.4 system-ui, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  min-height: 100svh;
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: max(1.5rem, env(safe-area-inset-top)) 1rem max(1.5rem, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  align-items: stretch;
+  gap: 1.5rem;
+  user-select: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: .5rem;
+  min-height: 3rem;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.tempo { display: grid; justify-items: center; gap: .25rem; }
+.unit, .ms { color: var(--muted); font-variant-numeric: tabular-nums; }
+.unit { font-size: 1.4rem; }
+.dial { display: flex; align-items: center; gap: 1rem; }
+.dial button { width: 4rem; height: 4rem; border-radius: 50%; font-size: 2rem; line-height: 1; touch-action: none; }
+.dial output { min-width: 5ch; text-align: center; font-size: 4.5rem; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
+.tempo input { width: 100%; margin-top: .75rem; accent-color: var(--fg); height: 2rem; }
+
+.meters { display: grid; grid-template-columns: repeat(4, 1fr); gap: .5rem; }
+.meters button { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.meters button[aria-checked="true"], .toggle[aria-checked="true"] {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
+}
+
+.toggle { font-size: 1.1rem; }
+
+/* Every click of the bar in a fixed place, the one just heard filled in. */
+.count { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: .35rem; min-height: 2.6rem; }
+.count span {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 50%;
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--muted-note);
+}
+.count span[hidden] { display: none; }
+.count.live span { color: var(--muted); }
+.count span.now { background: var(--cursor); color: var(--bg); }
+.count span.sub { width: .8rem; height: .8rem; border: 2px solid currentColor; background: none; }
+.count span.sub.now { border-color: var(--cursor); background: var(--cursor); }
+
+.start {
+  min-height: 4.5rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
+}
+.start.running { background: var(--wrong); border-color: var(--wrong); }

@@ -56,7 +56,8 @@ export default defineConfig(({ command }) => ({
     rollupOptions: {
       // spike.html is a second entry point: it ships with the deployed app so the
       // MIDI debugger is available on the tablet, not just on the laptop.
-      input: { main: here('./index.html'), spike: here('./spike.html') },
+      // metronome.html is the metronome on its own, for the phone.
+      input: { main: here('./index.html'), spike: here('./spike.html'), metronome: here('./metronome.html') },
     },
   },
 
