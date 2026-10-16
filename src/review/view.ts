@@ -193,7 +193,7 @@ export class ReviewView {
       if (x.wrongFor) continue;
       const pos = this.cursorMap.position(Math.max(0, x.onsetMs * this.speed));
       if (!pos) continue;
-      this.addMarker(`extra ${pitchName(x.pitch)}`, `${pitchName(x.pitch)} · not in the score · vel ${x.velocity}`, pos.x, pos.top);
+      this.addMarker(`extra ${pitchName(x.pitch)}`, `${pitchName(x.pitch)} · not in the score · vel ${x.velocityPct.toFixed(0)} %`, pos.x, pos.top);
     }
   }
 

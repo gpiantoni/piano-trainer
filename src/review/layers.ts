@@ -294,7 +294,7 @@ export function describe(n: PlayedNote, s: ReviewSettings, c: Context): string {
     name,
     `${signed(t.ms)} ms (${signed(t.pct)} % of beat)`,
     n.heldMs === undefined ? 'still held' : `held ${n.heldMs.toFixed(0)} ms (${n.durationPct?.toFixed(0) ?? '—'} %)`,
-    `vel ${n.velocity} (${n.velocityPct!.toFixed(0)} %)`,
+    `vel ${n.velocityPct!.toFixed(0)} %`,
   ];
   if (n.pedal) parts.push('pedal');
   const o = outside(n, s, c);

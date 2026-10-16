@@ -51,7 +51,7 @@ export type PlayedNote = {
 };
 
 // A key press that matched no note in the score.
-export type Extra = { pitch: number; onsetMs: number; velocity: number; wrongFor?: string };
+export type Extra = { pitch: number; onsetMs: number; velocity: number; velocityPct: number; wrongFor?: string };
 
 // One pedalled span after a tempo run, like a PlayedNote: a Ped. sign and the
 // * (or change sign) that ends it. The down is timed against the Ped.; the up

@@ -181,7 +181,7 @@ export function align(
   const from = startMs / speed + opts.biasMs - slack, to = endMs / speed + opts.biasMs + slack;
   const extras: Extra[] = presses
     .filter((p) => !used.has(p) && p.on >= from && p.on < to)
-    .map((p) => ({ pitch: p.pitch, onsetMs: p.on, velocity: p.velocity }));
+    .map((p) => ({ pitch: p.pitch, onsetMs: p.on, velocity: p.velocity, velocityPct: (p.velocity / 127) * 100 }));
 
   // A missed note with an unmatched key a semitone or two away, in its window:
   // most likely that key was meant for it.
