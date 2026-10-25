@@ -1,6 +1,10 @@
 # Plan: Follow mode
 
-Handoff, 2026-10-25. Follow mode is implemented and on `main`, following the principle below. **Next: the manual test checklist on the piano.**
+Handoff, 2026-10-25. Follow mode is implemented and on `main` (up to `2d98006`), following the principle below. Tests and build pass; nothing of the latest rule has been tried on the piano yet.
+
+**Next:**
+1. The user tests on the piano (2026-10-26) with the checklist below, saves runs, and writes what they found under "Piano test".
+2. The next session starts from those notes: see "For the next session".
 
 ## What Follow is
 
@@ -74,6 +78,14 @@ Where Follow lives:
 - **The first chord sets the clock.** Decided: the first chord (not a count-in) starts the clock. Known cost: if the first chord is off the player's pulse, every note until the next restart shifts with it. With restarts at the criterion this lasts only until the first chord outside it.
 - **One slip gives two marks.** A chord too late restarts the clock there; back on the pulse, the next chord reads early and restarts it again (19:34 run, bars 8–9: ▸49 ▸84 ▸31, then ◂−40). Accepted for now: it is what the clock measures.
 - **A hand found late in a chord.** The LH is on time, then the RH is found 2 beats later with the LH held. The chord doesn't restart the clock (one key inside), the RH reads very late, and the next chord probably restarts it instead.
+- **If restarts are still hard to see on the score.** Options discussed on 2026-10-25, before restarts moved to the criterion (try-out page first):
+  1. a thin vertical line just before each restart chord, with "| clock restarted" in the legend;
+  2. the same line labelled with how far off the chord was (`+24 %`);
+  3. in the popover of every note, where its clock started: `clock from bar 5 (restarted at +24 %)`;
+  4. a timing graph in the strip: timing over the piece, a sawtooth dropping at each restart, the criterion drawn as two lines;
+  5. faint alternating backgrounds, one per stretch between restarts.
+  The recommendation was 1 with 2's label; 4 if the drift itself should show.
+- **±10 % may restart too often.** At ±10 % the clock restarts at 10 %: 193 restarts in the 17:57 run's 878 notes, against 156 at ±20 %. Check whether ±10 % still reads sensibly.
 - **Fast passages crossing hands.** Wait asks for chords in strict order. If one hand's next note comes before the other hand's current one, it is a wrong key and must be struck again. Probably rare; check on a fast piece.
 
 ## Decided against (and why)
@@ -114,7 +126,15 @@ The 19:34 run, bars 3–6, % of a beat per chord (‖ = the clock restarts):
 - pauses at 50 %: `b3: 8 8 7 27 · b4: 35 31 29 27 27 30 · b5: 31 37 42 ‖50 · b6: −1 −3 −5 1`
 - restart at the criterion: `b3: 8 8 7 ‖27 · b4: 8 5 2 0 0 3 · b5: 5 10 15 ‖24 · b6: −1 −3 −5 1`
 
-Note: Save run writes `untilMs: Infinity` as `null` in the JSON.
+Note: Save run writes `untilMs: Infinity` as `null` in the JSON. Its `bpm` is the score's (65), not the run's: the run's bpm is `speed × 65`.
+
+Replaying a run (for example a new one from the piano test):
+```sh
+npm i --prefix <scratch dir> playwright-core        # once, outside the project
+npx vite --port 5199 --strictPort                    # in another terminal
+PW=<scratch dir> node scripts/replay-follow.mjs ~/Documents/MuseScore4/Scores/export/"Waltz in A minor.musicxml" runs/*.json
+```
+The script calls `analyseFollow` with the options as of `2d98006` (`within`, `matchBeats`). For older commits (`pauseBeats`), use `git show 1678bee:scripts/replay-follow.mjs`.
 
 ## Manual test checklist (tablet / laptop + piano)
 
@@ -129,8 +149,33 @@ Note: Save run writes `untilMs: Infinity` as `null` in the JSON.
 - [ ] The review appears when the last chord is let go. Its Duration is measured.
 - [ ] Duration, Velocity and Pedal layers populated; a note held through a stop has its duration. A pedal pressed during a stop reads late.
 - [ ] Bars section and Left/Right work. Stop mid-way shows a partial review, and keys after it do nothing until Restart.
-- [ ] Save run → JSON has `mode: "follow"` and the run's bpm. `__replay(json.recording, json.speed, Infinity, 'follow')` reproduces the review.
+- [ ] 10 % criterion: are the restarts still sensible, or too many? (See Open decisions.)
+- [ ] Save run → JSON has `mode: "follow"` and the run's `speed`. In the browser console, `__replay(json.recording, json.speed, Infinity, 'follow')` reproduces the review.
 - [ ] Wait and Tempo unchanged, except "at N bpm" in Tempo's summary.
+
+## Piano test (2026-10-26, to fill in)
+
+Runs saved (Save run, then move the JSON into `runs/`):
+-
+
+Checklist items that failed or felt wrong, and what was seen (bar numbers help):
+-
+
+Is it clear where the clock restarts? If not, which option from Open decisions, or something else:
+-
+
+One slip giving two marks (late, then early): acceptable?
+-
+
+Anything else:
+-
+
+## For the next session
+
+1. Read "Piano test" above. Anything not filled in is still untested.
+2. Replay the new runs with `scripts/replay-follow.mjs` and, for a confusing passage, print it chord by chord. The script prints totals only; for a per-chord view, group `a.notes` by `expected.onMs` and print `deltaPct` with ‖ where `restart === 'outside'`, bar by bar (`expected.measure + 1`).
+3. Look and sound changes (a restart mark, a graph) go on a try-out page first, then into the app.
+4. Keep this plan current: rules, "Where the code stands", Reference data with the new runs.
 
 ## Out of scope / later
 
