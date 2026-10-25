@@ -137,9 +137,9 @@ let timing: ScoreTiming | undefined;
 let practice: WaitMode | undefined;
 let run: TempoRun | undefined;
 // A Follow run: played like wait mode, every event recorded (t in real ms from
-// its first) and timed afterwards. `down`: keys held now; the run ends when the
-// last chord is done and they are all up.
-let followRun: { t0: number; recording: NoteEvent[]; down: Set<number> } | undefined;
+// its first) and timed afterwards at `speed`, the bpm when it started. `down`:
+// keys held now; the run ends when the last chord is done and they are all up.
+let followRun: { t0: number; speed: number; recording: NoteEvent[]; down: Set<number> } | undefined;
 let cursorMap: CursorMap | undefined;
 let latencyMs = Number(store.get('latencyMs')) || 0;
 let section: Section | undefined;   // some bars only; remembered per score
@@ -268,7 +268,7 @@ function onNote(ev: NoteEvent) {
 function recordFollow(ev: NoteEvent): boolean {
   if (!followRun) {
     if (ev.type === 'off' || (ev.type === 'pedal' && !ev.down)) return false;
-    followRun = { t0: ev.t, recording: [], down: new Set() };
+    followRun = { t0: ev.t, speed, recording: [], down: new Set() };
     startStop.textContent = 'Stop';
     startStop.classList.add('running');
     startStop.hidden = false;
@@ -287,7 +287,7 @@ function finishFollow() {
   if (!finished || !timing || !practice) return;
   if (practice.completions.length === 0) return restart();
   lastRun = {
-    mode: 'follow', recording: finished.recording, speed, untilMs: Infinity,
+    mode: 'follow', recording: finished.recording, speed: finished.speed, untilMs: Infinity,
     latencyMs: 0, recordedAt: new Date().toISOString(), window: playWindow(timing, section),
   };
   analyse();
@@ -548,7 +548,7 @@ function analyse() {
     const events = timing.events.filter((ev) => inWindow(window, ev.onMs));
     const a = analyseFollow(events, recording, runSpeed, { hands, window, pauseBeats: review.window }, timing.pedals);
     lastOffset = undefined;
-    review.show(a, runSpeed, { ms: undefined, notes: 0 }, true);
+    review.show(a, runSpeed, runSpeed * scoreBpm(timing), { ms: undefined, notes: 0 }, true);
     return;
   }
   const { recenter } = review.settings;
@@ -563,7 +563,7 @@ function analyse() {
   const chosen = biasMs === 0 && maxOffsetBeats === widest
     ? wide
     : align(timing.events, recording, runSpeed, { ...base, maxOffsetBeats, biasMs }, timing.pedals);
-  review.show(chosen, runSpeed, offset);
+  review.show(chosen, runSpeed, runSpeed * scoreBpm(timing), offset);
 }
 
 function downloadRun() {
@@ -604,16 +604,9 @@ function setBpm(next: number) {
 // 72 → 75 → 80 up, 72 → 70 → 65 down. The tolerance absorbs float noise in the
 // score's tempo (110.0000001 must step down to 105, not to 110).
 const steps = (bpm: number) => bpm / BPM_STEP;
-$('slower').onclick = () => { setBpm((Math.ceil(steps(practiceBpm) - 1e-6) - 1) * BPM_STEP); retime(); };
-$('faster').onclick = () => { setBpm((Math.floor(steps(practiceBpm) + 1e-6) + 1) * BPM_STEP); retime(); };
-
-// A Follow run's clock exists only in its review: at another bpm, time it again.
-// A tempo run keeps the bpm it was played at.
-function retime() {
-  if (lastRun?.mode !== 'follow') return;
-  lastRun = { ...lastRun, speed };
-  analyse();
-}
+// For the next run: a finished one keeps the bpm it was played at.
+$('slower').onclick = () => setBpm((Math.ceil(steps(practiceBpm) - 1e-6) - 1) * BPM_STEP);
+$('faster').onclick = () => setBpm((Math.floor(steps(practiceBpm) + 1e-6) + 1) * BPM_STEP);
 
 const clickButton = $<HTMLButtonElement>('click');
 function setClick(on: boolean) {

@@ -49,6 +49,7 @@ export class ReviewView {
   settings: ReviewSettings;
   alignment: Alignment | undefined;
   private speed = 1;
+  private bpm: number | undefined;   // the run's
   private offset: Offset = { ms: undefined, notes: 0 };
   private follow = false;           // a Follow run: no re-center, its own wording
   private noteEls = new Map<string, Element>();
@@ -82,9 +83,10 @@ export class ReviewView {
   // × beat: how far off a key may be and still count as that note.
   get window() { return windowOf(this.settings); }
 
-  show(alignment: Alignment, speed: number, offset: Offset, follow = false) {
+  show(alignment: Alignment, speed: number, bpm: number, offset: Offset, follow = false) {
     this.alignment = alignment;
     this.speed = speed;
+    this.bpm = bpm;
     this.offset = offset;
     this.follow = follow;
     this.byNoteId = new Map(alignment.notes.flatMap((n) => [n.expected.id, ...n.expected.tiedIds].map((id) => [id, n])));
@@ -139,7 +141,7 @@ export class ReviewView {
   private paint() {
     const a = this.alignment;
     const s = this.shown;
-    const c = a && context(a, s, this.speed, this.offset, this.follow);
+    const c = a && context(a, s, this.speed, this.offset, this.follow, this.bpm);
     for (const [id, el] of this.noteEls) {
       const n = this.byNoteId.get(id);
       // Pedal: the signs carry the colour, the notes stay black.
@@ -221,7 +223,7 @@ export class ReviewView {
     document.body.classList.toggle('reviewing', !!a);
     if (!a) { strip.replaceChildren(); return; }
     const s = this.shown;
-    const c = context(a, s, this.speed, this.offset, this.follow);
+    const c = context(a, s, this.speed, this.offset, this.follow, this.bpm);
 
     const canRecenter = this.offset.ms !== undefined;
     const recenterOpt = segment('', button('Re-center', s.recenter, () => this.set({ recenter: !s.recenter }),
@@ -321,7 +323,7 @@ export class ReviewView {
   // In the Pedal layer, the pedal signs instead of the notes.
   private onTap(e: MouseEvent) {
     if (!this.alignment) return;
-    const c = context(this.alignment, this.shown, this.speed, this.offset, this.follow);
+    const c = context(this.alignment, this.shown, this.speed, this.offset, this.follow, this.bpm);
     const pedal = this.shown.layer === 'pedal';
     let best: { text: () => string; r: DOMRect; d: number } | undefined;
     const consider = (el: Element, text: () => string) => {

@@ -49,9 +49,9 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   The run ends when the last chord is let go (or **Stop**), then shows the same
   review as tempo mode, with the pauses and wrong keys in the summary. A note or
   pedal held through a pause has no duration %. On time is the review's
-  criterion; there is no re-center, and latency calibration is not needed. −/+
-  during the review times the same playing at another bpm. **Restart** to play
-  again.
+  criterion; there is no re-center, and latency calibration is not needed. The
+  bpm is the one set when the run started: −/+ afterwards is for the next run.
+  **Restart** to play again.
 
   **Tempo mode**: pick a tempo (−/+ in steps of 5 bpm; shown as bpm · % of the
   score's tempo · one beat in ms, remembered per score), **Start** (or Space), one bar of count-in clicks,
@@ -67,7 +67,8 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   duration scale by how long it stayed down, as % of the written span; grey =
   it didn't go down, × = a pedal not in the score). Missed notes, the other hand and
   notes after an early **Stop** are grey. Tap a note for
-  its numbers. These are measurements, not grades. **Save run** downloads the
+  its numbers; the summary names the bpm the run was played at. These are
+  measurements, not grades. **Save run** downloads the
   raw recording as JSON. **⏱** calibrates latency: tap along with 8 clicks once
   per device.
 

@@ -70,9 +70,10 @@ export type Context = {
   offset: Offset;
   biasMs: number;           // offset.ms when re-center is on and there's enough data; 0 otherwise
   follow: boolean;          // a Follow run: no missed notes, untimed restarts, no re-center
+  bpm?: number;             // the run's practice tempo
 };
 
-export function context(a: Alignment, s: ReviewSettings, speed: number, offset: Offset, follow = false): Context {
+export function context(a: Alignment, s: ReviewSettings, speed: number, offset: Offset, follow = false, bpm?: number): Context {
   const first = a.notes[0]?.expected.beatMs;
   const beatMs = first ? first / speed : undefined;
   const v = a.notes.flatMap((n) => (n.velocityPct === undefined ? [] : [n.velocityPct]));
@@ -83,7 +84,7 @@ export function context(a: Alignment, s: ReviewSettings, speed: number, offset: 
     else { velocityLo = lo; velocityHi = hi; }
   }
   const biasMs = s.recenter && !follow ? offset.ms ?? 0 : 0;
-  return { velocityLo, velocityHi, speed, beatMs, offset, biasMs, follow };
+  return { velocityLo, velocityHi, speed, beatMs, offset, biasMs, follow, bpm };
 }
 
 // A timing offset from the (re-centered) zero: ms, and % of its beat.
@@ -266,6 +267,7 @@ export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
       const lh = timed.filter((n) => n.expected.staff === 2);
       parts.push(`median ${fmt(timed)}`);
       if (rh.length && lh.length) parts.push(`RH ${fmt(rh)}`, `LH ${fmt(lh)}`);
+      if (c.bpm) parts.push(`at ${Math.round(c.bpm)} bpm`);
       if (c.beatMs) parts.push(`1 beat = ${Math.round(c.beatMs)} ms`);
       return [...parts, ...offsetPart(s, c)].join(' · ');
     }
@@ -284,6 +286,7 @@ export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
       if (held.length) parts.push(`held median ${quantile(held, 0.5).toFixed(0)} %`);
       parts.push(`${a.pedalExtras.length} extra`);
       if (!a.pedalReceived) parts.push('no pedal signal from the piano');
+      if (c.bpm) parts.push(`at ${Math.round(c.bpm)} bpm`);
       if (c.beatMs) parts.push(`1 beat = ${Math.round(c.beatMs)} ms`);
       return [...parts, ...offsetPart(s, c)].join(' · ');
     }

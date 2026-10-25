@@ -70,14 +70,14 @@ test('Follow: restarts are grey and untimed; pauses and wrong keys in the summar
   ]);
   const s = { ...relaxed, recenter: true };
   const a = analyseFollow(events, recording, 1, { hands: 'both', window: { startMs: 0, endMs: 2000 }, pauseBeats: windowOf(s) });
-  const c = context(a, s, 1, { ms: undefined, notes: 0 }, true);
+  const c = context(a, s, 1, { ms: undefined, notes: 0 }, true, 120);
   assert.equal(c.biasMs, 0);
   assert.equal(colorFor(a.notes[0], s, c), NOT_MEASURED);
   assert.equal(colorFor(a.notes[2], s, c), NOT_MEASURED);
   assert.notEqual(colorFor(a.notes[3], s, c), NOT_MEASURED);
   assert.equal(outside(a.notes[2], s, c), undefined);
   assert.deepEqual(counts(a, s, c), { within: 2, early: 0, late: 0, missed: 0, untimed: 2, total: 4 });
-  assert.equal(summary(a, s, c), '2 / 4 within ±20 % · 0 early · 0 late · 1 pause · 1 wrong key · median +5 % (+25 ms) · 1 beat = 500 ms');
+  assert.equal(summary(a, s, c), '2 / 4 within ±20 % · 0 early · 0 late · 1 pause · 1 wrong key · median +5 % (+25 ms) · at 120 bpm · 1 beat = 500 ms');
   assert.match(describe(a.notes[0], s, c), /^C4 · clock started here · held 100 ms/);
   assert.match(describe(a.notes[2], s, c), /^D4 · clock restarted here \(pause\) · held/);
 });
