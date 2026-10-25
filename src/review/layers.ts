@@ -299,11 +299,13 @@ export function describe(n: PlayedNote, s: ReviewSettings, c: Context): string {
   if (n.status !== 'played') {
     return n.wrongPitch !== undefined ? `${name} · missed (played ${pitchName(n.wrongPitch)})` : `${name} · missed`;
   }
+  // Follow: where the clock (re)started; timed against the bar after it, if that was played.
+  const start = n.restart === 'first' ? 'clock started here' : n.restart === 'pause' ? 'clock restarted here (pause)' : undefined;
+  const t = n.deltaMs === undefined ? undefined : timing(n, c);
   const parts = [
     name,
-    n.restart === 'first' ? 'clock started here'
-      : n.restart === 'pause' ? 'clock restarted here (pause)'
-      : ((t) => `${signed(t.ms)} ms (${signed(t.pct)} % of beat)`)(timing(n, c)),
+    ...(t ? [`${signed(t.ms)} ms (${signed(t.pct)} % of beat)`] : []),
+    ...(start ? [start] : []),
     n.heldMs === undefined ? 'still held' : `held ${n.heldMs.toFixed(0)} ms (${n.durationPct?.toFixed(0) ?? '—'} %)`,
     `vel ${n.velocityPct!.toFixed(0)} %`,
   ];

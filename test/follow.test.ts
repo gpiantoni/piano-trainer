@@ -69,11 +69,56 @@ test('the match window decides what is a pause', () => {
 });
 
 test('drift is not forgiven: lateness grows until a pause', () => {
-  const a = analyseFollow(melody(6), playAt([0, 575, 1150, 1725, 2300, 2875]), 1, OPTS);
+  // A steady first bar (4/4), then each beat 15 % slower than the last.
+  const a = analyseFollow(melody(9), playAt([0, 500, 1000, 1500, 2075, 2650, 3225, 3800, 4375]), 1, OPTS);
   const pct = a.notes.map((n) => n.deltaPct);
-  near(pct[1], 15); near(pct[2], 30); near(pct[3], 45);
+  near(pct[0], 0, 'fitted: the first chord is timed');
+  near(pct[4], 15); near(pct[5], 30); near(pct[6], 45);
+  assert.equal(a.notes[7].restart, 'pause');
+  near(pct[8], 15);
+});
+
+test('bar-based start: an odd first chord does not shift the rest', () => {
+  // Everything after the first chord a quarter beat earlier than it implies.
+  const a = analyseFollow(melody(6), playAt([0, 375, 875, 1375, 1875, 2375]), 1, OPTS);
+  assert.equal(a.notes[0].restart, 'first');
+  near(a.notes[0].deltaPct, 25, 'the first chord reads late against its bar');
+  for (const n of a.notes.slice(1)) near(n.deltaMs, 0);
+});
+
+test('bar-based start: one odd chord in the first bar does not move the clock', () => {
+  const a = analyseFollow(melody(6), playAt([0, 375, 1000, 1500, 2000, 2500]), 1, OPTS);
+  near(a.notes[0].deltaMs, 0);
+  near(a.notes[1].deltaPct, -25);
+  for (const n of a.notes.slice(2)) near(n.deltaMs, 0);
+});
+
+test('bar-based start: each chord counts by its median key, so a leading hand does not set the clock', () => {
+  const score = [0, 1, 2, 3, 4, 5].flatMap((i) => [note(`l${i}`, 48 + i, i * BEAT, 2), note(`r${i}`, 60 + i, i * BEAT)]);
+  // LH 40 ms ahead of the beat, RH 40 ms behind, after a first chord together.
+  const recording = rec(key(48, 0), key(60, 0),
+    ...[1, 2, 3, 4, 5].flatMap((i) => [key(48 + i, i * BEAT - 40), key(60 + i, i * BEAT + 40)]));
+  const a = analyseFollow(score, recording, 1, OPTS);
+  near(byId(a.notes, 'l1').deltaPct, -8);
+  near(byId(a.notes, 'r1').deltaPct, 8);
+});
+
+test('bar-based start: after a pause, the new stretch is fitted on its own bar', () => {
+  // n4 after a stop; the chords after it come 100 ms earlier than n4 implies.
+  const a = analyseFollow(melody(10), playAt([0, 500, 1000, 1500, 3500, 3900, 4400, 4900, 5400, 5900]), 1, OPTS);
+  near(a.notes[0].deltaMs, 0);
   assert.equal(a.notes[4].restart, 'pause');
-  near(pct[5], 15);
+  near(a.notes[4].deltaPct, 20);
+  for (const n of a.notes.slice(5)) near(n.deltaMs, 0);
+  assert.equal(pauses(a.notes), 1);
+});
+
+test('bar-based start: the bar follows the meter', () => {
+  // 3/4: the fit comes after 3 beats, so a stretch of 4 chords is fitted.
+  const a = analyseFollow(melody(4), playAt([0, 375, 875, 1375]), 1, { ...OPTS, measures: [{ meter: { count: 3, unit: 4 } }] });
+  near(a.notes[0].deltaPct, 25);
+  near(a.notes[3].deltaMs, 0);
+  assert.equal(analyseFollow(melody(4), playAt([0, 375, 875, 1375]), 1, OPTS).notes[0].deltaMs, undefined, '4/4: not past its bar');
 });
 
 test('early is timed, never a pause', () => {
@@ -194,7 +239,7 @@ test('fewest errors: the bpm the playing matches best, ties to the nearest', () 
   // Steady at 600 ms a beat: 100 bpm where the score says 120.
   const recording = playAt([0, 600, 1200, 1800, 2400, 3000]);
   const best = fewestErrors(melody(6), recording, OPTS, 0.1, [80, 90, 100, 110, 120], 120, 120);
-  assert.deepEqual(best, { bpm: 100, within: 5, total: 6 });
+  assert.deepEqual(best, { bpm: 100, within: 6, total: 6 });
   // Two chords only: within ±50 % at 95 and at 105 alike.
   const two = playAt([0, 600]);
   assert.equal(fewestErrors(melody(2), two, OPTS, 0.5, [95, 105], 120, 104)?.bpm, 105);
