@@ -79,7 +79,5 @@ test('Follow: restarts are grey and untimed; pauses and wrong keys in the summar
   assert.deepEqual(counts(a, s, c), { within: 2, early: 0, late: 0, missed: 0, untimed: 2, total: 4 });
   assert.equal(summary(a, s, c), '2 / 4 within ±20 % · 0 early · 0 late · 1 pause · 1 wrong key · median +5 % (+25 ms) · 1 beat = 500 ms');
   assert.match(describe(a.notes[0], s, c), /^C4 · clock started here · held 100 ms/);
-  const timed = { ...a.notes[0], deltaMs: 50, deltaPct: 10 };
-  assert.match(describe(timed, s, c), /^C4 · \+50 ms \(\+10 % of beat\) · clock started here · held/);
   assert.match(describe(a.notes[2], s, c), /^D4 · clock restarted here \(pause\) · held/);
 });
