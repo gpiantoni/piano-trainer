@@ -7,7 +7,7 @@ import { WaitMode, forHands, noteName, type Feedback } from './engine/waitMode.t
 import { Metronome } from './engine/metronome.ts';
 import { TempoRun } from './engine/tempoRun.ts';
 import { OFFSET_MIN_NOTES, align, runOffset } from './engine/align.ts';
-import { analyseFollow } from './engine/follow.ts';
+import { analyseFollow, fewestErrors } from './engine/follow.ts';
 import { CALIBRATION, estimateLatency } from './engine/calibration.ts';
 import { ReviewView } from './review/view.ts';
 import { WIDEST_WINDOW } from './review/palettes.ts';
@@ -153,6 +153,8 @@ type LastRun = {
 let lastRun: LastRun | undefined;
 // Its median timing offset (real ms, after latencyMs), as re-center uses it.
 let lastOffset: ReturnType<typeof runOffset> | undefined;
+// A Follow run's bpm with the fewest errors, for the criterion it was found at.
+let bestOf: { run: NoteEvent[]; within: number; best: ReturnType<typeof fewestErrors> } | undefined;
 
 const metronome = new Metronome();
 metronome.enabled = store.get('click') !== 'off';
@@ -165,6 +167,7 @@ const review = new ReviewView({
   save: (settings) => store.set('review', JSON.stringify(settings)),
   realign: () => analyse(),
   download: downloadRun,
+  setBpm: (bpm) => { setBpm(bpm); retime(); },
 });
 
 // ---- painting -------------------------------------------------------------
@@ -546,9 +549,18 @@ function analyse() {
     // Untimed restarts instead of a run-wide offset: no re-center.
     const { recording, speed: runSpeed, window } = lastRun;
     const events = timing.events.filter((ev) => inWindow(window, ev.onMs));
-    const a = analyseFollow(events, recording, runSpeed, { hands, window, pauseBeats: review.window }, timing.pedals);
+    const opts = { hands, window, pauseBeats: review.window };
+    const a = analyseFollow(events, recording, runSpeed, opts, timing.pedals);
     lastOffset = undefined;
-    review.show(a, runSpeed, { ms: undefined, notes: 0 }, true);
+    const base = scoreBpm(timing), bpm = runSpeed * base;
+    // Every bpm the −/+ can reach, and the one the run is timed at. Only the
+    // criterion changes the answer: kept until it does.
+    const within = review.settings.within;
+    if (bestOf?.run !== lastRun.recording || bestOf.within !== within) {
+      const bpms = [...bpmSteps(base), bpm];
+      bestOf = { run: lastRun.recording, within, best: fewestErrors(events, recording, opts, within, bpms, base, bpm) };
+    }
+    review.show(a, runSpeed, { ms: undefined, notes: 0 }, { bpm, best: bestOf.best });
     return;
   }
   const { recenter } = review.settings;
@@ -589,13 +601,22 @@ function scoreBpm(t: ScoreTiming) {
   return t.bpm / quarters;
 }
 
+// The practice tempo's range: multiples of BPM_STEP up to SPEED_MAX × the score's.
+function bpmRange(base: number) {
+  const lo = Math.max(BPM_STEP, BPM_MIN);
+  return { lo, hi: Math.max(Math.floor((base * SPEED_MAX) / BPM_STEP) * BPM_STEP, lo) };
+}
+function bpmSteps(base: number) {
+  const { lo, hi } = bpmRange(base);
+  return Array.from({ length: (hi - lo) / BPM_STEP + 1 }, (_, i) => lo + i * BPM_STEP);
+}
+
 function setBpm(next: number) {
   const output = $('speed');
   if (!timing || !loaded) { output.textContent = '— bpm'; return; }
   const base = scoreBpm(timing);
-  const lo = Math.max(BPM_STEP, BPM_MIN);
-  const hi = Math.floor((base * SPEED_MAX) / BPM_STEP) * BPM_STEP;
-  practiceBpm = Math.min(Math.max(next, lo), Math.max(hi, lo));
+  const { lo, hi } = bpmRange(base);
+  practiceBpm = Math.min(Math.max(next, lo), hi);
   speed = practiceBpm / base;
   store.set(`bpm:${loaded.id}`, String(practiceBpm));
   output.textContent = `${Math.round(practiceBpm)} bpm · ${Math.round(speed * 100)} % · ${Math.round(60000 / practiceBpm)} ms`;

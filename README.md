@@ -50,8 +50,9 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   review as tempo mode, with the pauses and wrong keys in the summary. A note or
   pedal held through a pause has no duration %. On time is the review's
   criterion; there is no re-center, and latency calibration is not needed. −/+
-  during the review times the same playing at another bpm. **Restart** to play
-  again.
+  during the review times the same playing at another bpm; **fewest errors at
+  N bpm** names the step where the most notes are within the criterion, and
+  tapping it times the run there. **Restart** to play again.
 
   **Tempo mode**: pick a tempo (−/+ in steps of 5 bpm; shown as bpm · % of the
   score's tempo · one beat in ms, remembered per score), **Start** (or Space), one bar of count-in clicks,

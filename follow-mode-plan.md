@@ -18,6 +18,7 @@ Wait and Tempo stay unchanged, except for the small instrumentation of `WaitMode
 | Thing | Rule |
 |---|---|
 | Tempo | The set practice bpm (`speed`, the same −/+ control and per-score memory as Tempo). Not inferred from playing. During a Follow review, −/+ re-runs the analysis at the new bpm, and Save run records the bpm in use. |
+| Fewest errors | Added after the first runs. The review also times the run at every bpm −/+ can reach (and at its own), and names the one with the most notes within the selected criterion: `fewest errors at 50 bpm (186 / 366)`. Ties go to the nearest to the run's bpm. Tapping it re-times the review there and sets the bpm; the review still opens at the bpm you set. No played-tempo estimate: sections can't be defined easily and consistently. |
 | Clock | `expected(chord) = anchor.realMs + (chord.onMs − anchor.onMs) / speed`. `onMs` already contains the score's written tempo changes. |
 | Anchor | The first chord played. Afterwards, every chord that counts as a pause. Nothing else ever moves the anchor. |
 | Chord onset | The earliest on-time among the presses that completed the chord (see "counted press" below). Used for the pause decision and as the anchor's time. |

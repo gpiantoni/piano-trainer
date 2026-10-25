@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { analyseFollow, type FollowOptions } from '../src/engine/follow.ts';
+import { analyseFollow, fewestErrors, type FollowOptions } from '../src/engine/follow.ts';
 import type { ExpectedEvent, NoteEvent, PedalMark, PlayedNote, Staff } from '../src/types.ts';
 
 // Quarter notes at 120 BPM (beat = 500 ms), speed 1, the ±20 % criterion's
@@ -188,4 +188,16 @@ test('pedal down during a pause is untimed; held through one, it has no duration
 test('nothing completed: an empty report', () => {
   const a = analyseFollow(melody(3), rec(key(70, 0)), 1, OPTS);
   assert.deepEqual([a.notes.length, a.extras.length], [0, 0]);
+});
+
+test('fewest errors: the bpm the playing matches best, ties to the nearest', () => {
+  // Steady at 600 ms a beat: 100 bpm where the score says 120.
+  const recording = playAt([0, 600, 1200, 1800, 2400, 3000]);
+  const best = fewestErrors(melody(6), recording, OPTS, 0.1, [80, 90, 100, 110, 120], 120, 120);
+  assert.deepEqual(best, { bpm: 100, within: 5, total: 6 });
+  // Two chords only: within ±50 % at 95 and at 105 alike.
+  const two = playAt([0, 600]);
+  assert.equal(fewestErrors(melody(2), two, OPTS, 0.5, [95, 105], 120, 104)?.bpm, 105);
+  assert.equal(fewestErrors(melody(2), two, OPTS, 0.5, [95, 105], 120, 96)?.bpm, 95);
+  assert.equal(fewestErrors(melody(1), playAt([0]), OPTS, 0.1, [100], 120, 100), undefined);
 });

@@ -116,3 +116,24 @@ export function analyseFollow(
 
   return { notes, extras, pedals, pedalExtras, pedalReceived };
 }
+
+// The bpm, among `bpms`, at which the most notes of the run are within the
+// criterion (`within`, × beat): the same playing timed at each. Ties go to the
+// one nearest `nearBpm`. Undefined if nothing was timed at any of them.
+export type Best = { bpm: number; within: number; total: number };
+
+export function fewestErrors(
+  events: ExpectedEvent[], recording: NoteEvent[], opts: FollowOptions,
+  within: number, bpms: number[], baseBpm: number, nearBpm: number,
+): Best | undefined {
+  let best: Best | undefined;
+  for (const bpm of bpms) {
+    const { notes } = analyseFollow(events, recording, bpm / baseBpm, opts);
+    const k = notes.filter((n) => n.deltaPct !== undefined && Math.abs(n.deltaPct) <= within * 100).length;
+    if (k === 0) continue;
+    if (!best || k > best.within || (k === best.within && Math.abs(bpm - nearBpm) < Math.abs(best.bpm - nearBpm))) {
+      best = { bpm, within: k, total: notes.length };
+    }
+  }
+  return best;
+}

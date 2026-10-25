@@ -1,4 +1,5 @@
 import { OFFSET_MIN_NOTES, type Alignment } from '../engine/align.ts';
+import type { Best } from '../engine/follow.ts';
 import type { CursorMap } from '../score/cursor.ts';
 import type { PlayedNote, PlayedPedal } from '../types.ts';
 import {
@@ -23,7 +24,11 @@ type Options = {
   save: (s: ReviewSettings) => void;
   realign: () => void;           // criterion (so match window) or re-center changed
   download: () => void;
+  setBpm: (bpm: number) => void; // Follow: time the run at this bpm
 };
+
+// A Follow run's review: the bpm it is timed at, and the one with the fewest errors.
+export type FollowReview = { bpm: number; best?: Best };
 
 const button = (label: string, pressed: boolean, onClick: () => void, title = '') => {
   const b = document.createElement('button');
@@ -50,7 +55,7 @@ export class ReviewView {
   alignment: Alignment | undefined;
   private speed = 1;
   private offset: Offset = { ms: undefined, notes: 0 };
-  private follow = false;           // a Follow run: no re-center, its own wording
+  private follow: FollowReview | undefined;   // a Follow run: no re-center, its own wording
   private noteEls = new Map<string, Element>();
   private cursorMap: CursorMap | undefined;
   private byNoteId = new Map<string, PlayedNote>();
@@ -82,7 +87,7 @@ export class ReviewView {
   // × beat: how far off a key may be and still count as that note.
   get window() { return windowOf(this.settings); }
 
-  show(alignment: Alignment, speed: number, offset: Offset, follow = false) {
+  show(alignment: Alignment, speed: number, offset: Offset, follow?: FollowReview) {
     this.alignment = alignment;
     this.speed = speed;
     this.offset = offset;
@@ -139,7 +144,7 @@ export class ReviewView {
   private paint() {
     const a = this.alignment;
     const s = this.shown;
-    const c = a && context(a, s, this.speed, this.offset, this.follow);
+    const c = a && context(a, s, this.speed, this.offset, !!this.follow);
     for (const [id, el] of this.noteEls) {
       const n = this.byNoteId.get(id);
       // Pedal: the signs carry the colour, the notes stay black.
@@ -221,7 +226,7 @@ export class ReviewView {
     document.body.classList.toggle('reviewing', !!a);
     if (!a) { strip.replaceChildren(); return; }
     const s = this.shown;
-    const c = context(a, s, this.speed, this.offset, this.follow);
+    const c = context(a, s, this.speed, this.offset, !!this.follow);
 
     const canRecenter = this.offset.ms !== undefined;
     const recenterOpt = segment('', button('Re-center', s.recenter, () => this.set({ recenter: !s.recenter }),
@@ -231,6 +236,13 @@ export class ReviewView {
     recenterOpt.classList.add('push-right');
     (recenterOpt.querySelector('button') as HTMLButtonElement).disabled = !canRecenter;
 
+    // Follow: the same playing timed at each bpm; tap to time it at the best.
+    const best = this.follow?.best;
+    const bestOpt = best && segment('', button(`fewest errors at ${Math.round(best.bpm)} bpm (${best.within} / ${best.total})`,
+      Math.abs(best.bpm - this.follow!.bpm) < 1e-6, () => this.opts.setBpm(best.bpm),
+      `The most notes within ±${Math.round(s.within * 100)} %: time this run at ${Math.round(best.bpm)} bpm`));
+    bestOpt?.classList.add('push-right');
+
     const top = document.createElement('div');
     top.className = 'strip-row';
     top.append(
@@ -238,8 +250,8 @@ export class ReviewView {
         .map(([id, label]) => button(label, s.layer === id, () => this.set({ layer: id })))),
       Object.assign(document.createElement('span'), { className: 'summary', textContent: summary(a, s, c) }),
       // Follow: each stretch after a pause has its own start, so one run-wide offset doesn't fit.
-      ...(this.follow ? [] : [recenterOpt]),
-      Object.assign(button('Save run', false, () => this.opts.download(), 'Download this run as JSON'), { className: this.follow ? 'save push-right' : 'save' }),
+      ...(this.follow ? (bestOpt ? [bestOpt] : []) : [recenterOpt]),
+      Object.assign(button('Save run', false, () => this.opts.download(), 'Download this run as JSON'), { className: this.follow && !bestOpt ? 'save push-right' : 'save' }),
     );
 
     const bottom = document.createElement('div');
@@ -321,7 +333,7 @@ export class ReviewView {
   // In the Pedal layer, the pedal signs instead of the notes.
   private onTap(e: MouseEvent) {
     if (!this.alignment) return;
-    const c = context(this.alignment, this.shown, this.speed, this.offset, this.follow);
+    const c = context(this.alignment, this.shown, this.speed, this.offset, !!this.follow);
     const pedal = this.shown.layer === 'pedal';
     let best: { text: () => string; r: DOMRect; d: number } | undefined;
     const consider = (el: Element, text: () => string) => {
