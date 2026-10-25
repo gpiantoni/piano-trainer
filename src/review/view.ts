@@ -239,7 +239,7 @@ export class ReviewView {
       segment('', ...LAYERS.filter(([id]) => id !== 'pedal' || this.hasPedal)
         .map(([id, label]) => button(label, s.layer === id, () => this.set({ layer: id })))),
       Object.assign(document.createElement('span'), { className: 'summary', textContent: summary(a, s, c) }),
-      // Follow: each stretch after a pause has its own start, so one run-wide offset doesn't fit.
+      // Follow: each stretch after a restart has its own start, so one run-wide offset doesn't fit.
       ...(this.follow ? [] : [recenterOpt]),
       Object.assign(button('Save run', false, () => this.opts.download(), 'Download this run as JSON'), { className: this.follow ? 'save push-right' : 'save' }),
     );
@@ -297,7 +297,7 @@ export class ReviewView {
             className: 'key-legend',
             innerHTML: `<b class="k-arrow">◂ ▸</b> outside ±${pct(s.within)} `
               + (this.follow
-                ? '<i class="k unmoved"></i>clock started <b class="k-x">×</b> wrong key'
+                ? '(a whole chord: the clock restarts there) <i class="k unmoved"></i>clock started <b class="k-x">×</b> wrong key'
                 : '<i class="k unmoved"></i>missed <b class="k-x">×</b> extra key'),
           }),
         );

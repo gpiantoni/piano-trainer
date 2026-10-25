@@ -58,7 +58,7 @@ test('counts cover every expected note, missed ones included', () => {
   assert.match(summary(a, strict, c), /^2 \/ 6 within ±10 % · 1 early · 1 late · 2 missed · 1 extra/);
 });
 
-test('Follow: the first chord is grey and untimed, a pause is late; pauses and wrong keys in the summary, no median, no re-center', () => {
+test('Follow: the first chord is grey and untimed, a stop is late; wrong keys in the summary, no median, no re-center', () => {
   const events: ExpectedEvent[] = [0, 1, 2, 3].map((i) => ({
     id: `n${i}`, tiedIds: [], pitch: 60 + i, staff: 1,
     onMs: i * BEAT, offMs: (i + 1) * BEAT, beatMs: BEAT, measure: 0,
@@ -69,7 +69,7 @@ test('Follow: the first chord is grey and untimed, a pause is late; pauses and w
     { type: 'off' as const, pitch, velocity: 0, t: t + 100 },
   ]);
   const s = { ...relaxed, recenter: true };
-  const a = analyseFollow(events, recording, 1, { hands: 'both', window: { startMs: 0, endMs: 2000 }, pauseBeats: windowOf(s) });
+  const a = analyseFollow(events, recording, 1, { hands: 'both', window: { startMs: 0, endMs: 2000 }, within: s.within, matchBeats: windowOf(s) });
   const c = context(a, s, 1, { ms: undefined, notes: 0 }, true, 120);
   assert.equal(c.biasMs, 0);
   assert.equal(colorFor(a.notes[0], s, c), NOT_MEASURED);
@@ -77,7 +77,7 @@ test('Follow: the first chord is grey and untimed, a pause is late; pauses and w
   assert.notEqual(colorFor(a.notes[3], s, c), NOT_MEASURED);
   assert.equal(outside(a.notes[2], s, c), 'late');
   assert.deepEqual(counts(a, s, c), { within: 2, early: 0, late: 1, missed: 0, untimed: 1, total: 4 });
-  assert.equal(summary(a, s, c), '2 / 4 within ±20 % · 0 early · 1 late · 1 pause · 1 wrong key · at 120 bpm · 1 beat = 500 ms');
+  assert.equal(summary(a, s, c), '2 / 4 within ±20 % · 0 early · 1 late · 1 wrong key · at 120 bpm · 1 beat = 500 ms');
   assert.match(describe(a.notes[0], s, c), /^C4 · clock started here · held 100 ms/);
-  assert.match(describe(a.notes[2], s, c), /^D4 · \+1500 ms \(\+300 % of beat\) · clock restarted here \(pause\) · held/);
+  assert.match(describe(a.notes[2], s, c), /^D4 · \+1500 ms \(\+300 % of beat\) · clock restarted here · held/);
 });

@@ -44,13 +44,12 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   **Follow mode**: plays exactly like wait mode, with no metronome, but the run
   is timed afterwards against a clock at the set bpm (−/+). The clock starts on
   the first chord (grey, untimed) and is never nudged towards you, so dragging
-  or rushing shows. A chord later than the match window (50 % of a beat at the
-  ±20 % criterion, 30 % at ±10 %) is a pause: a stop is late, so that chord reads
-  late, and the clock restarts there.
-  The run ends when the last chord is let go (or **Stop**), then shows the same
-  review as tempo mode, with the pauses and wrong keys in the summary. A note or
-  pedal held through a pause has no duration %. On time is the review's
-  criterion; there is no re-center, and latency calibration is not needed. The
+  or rushing shows, up to the criterion: a chord with every key outside it,
+  early or late, is marked ◂ or ▸ and the clock restarts from it. A stop is just
+  a late chord. The run ends when the last chord is let go (or **Stop**), then
+  shows the same review as tempo mode, with the wrong keys in the summary. On
+  time is the review's criterion (±10 or ±20 %), which also decides where the
+  clock restarts; there is no re-center, and latency calibration is not needed. The
   bpm is the one set when the run started: −/+ afterwards is for the next run.
   **Restart** to play again.
 

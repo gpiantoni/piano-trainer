@@ -546,7 +546,8 @@ function analyse() {
     // Untimed restarts instead of a run-wide offset: no re-center.
     const { recording, speed: runSpeed, window } = lastRun;
     const events = timing.events.filter((ev) => inWindow(window, ev.onMs));
-    const a = analyseFollow(events, recording, runSpeed, { hands, window, pauseBeats: review.window }, timing.pedals);
+    const opts = { hands, window, within: review.settings.within, matchBeats: review.window };
+    const a = analyseFollow(events, recording, runSpeed, opts, timing.pedals);
     lastOffset = undefined;
     review.show(a, runSpeed, runSpeed * scoreBpm(timing), { ms: undefined, notes: 0 }, true);
     return;

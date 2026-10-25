@@ -1,25 +1,24 @@
 import type { ExpectedEvent, Extra, Hands, NoteEvent, PedalMark, PlayedNote } from '../types.ts';
 import { DEFAULT_ALIGN, alignPedal, keyPresses, pedalPresses, type Alignment } from './align.ts';
-import { WaitMode, type Completion } from './waitMode.ts';
+import { WaitMode } from './waitMode.ts';
 import { lastAtOrBefore } from '../score/beats.ts';
 
 // After a Follow run: played like wait mode, timed afterwards against a clock at
 // the practice speed. The clock starts on the first chord and is never nudged
-// towards the player, so drift shows. A chord later than the match window is a
-// pause: a stop is late, so that chord is timed against the clock that was
-// running, and then the clock restarts from it. Only the first chord is untimed.
-// Pure: no DOM, no clock.
+// towards the player, so drift shows, up to the criterion: a chord all outside
+// it, early or late, is timed against the clock that was running and the clock
+// restarts from it. A stop is just a late chord. Only the first chord is
+// untimed. Pure: no DOM, no clock.
 
 export type FollowOptions = {
   hands: Hands;
   window: { startMs: number; endMs: number };   // the section, as in align; only the pedal needs it
-  pauseBeats: number;                            // later than this (× beat) is a pause: the review's match window
+  within: number;                                // × beat: the review's criterion; a chord all outside it restarts the clock
+  matchBeats: number;                            // × beat: the review's match window, for the pedal
 };
 
 // Where the clock (re)started: real ms, and the chord's score ms.
 type Anchor = { realMs: number; onMs: number };
-
-const onsetOf = (c: Completion) => Math.min(...[...c.presses.values()].map((p) => p.t));
 
 export function analyseFollow(
   events: ExpectedEvent[],      // the notes wait mode asked for: the section's
@@ -36,35 +35,35 @@ export function analyseFollow(
   if (done.length === 0) return { notes: [], extras: [], pedals: [], pedalExtras: [], pedalReceived };
 
   // The clock, chord by chord: each chord's expected real time; the first is
-  // an anchor only, a pause is timed and then an anchor.
+  // an anchor only, a chord all outside the criterion is timed and then an anchor.
   const anchors: Anchor[] = [];
-  const restart = new Map<number, 'first' | 'pause'>();   // chord index → why the clock (re)started there
-  const expectedAt = new Map<number, number>();           // chord index → real ms
+  const restart = new Map<number, 'first' | 'outside'>();   // chord index → why the clock (re)started there
+  const expectedAt = new Map<number, number>();             // chord index → real ms
   for (const c of done) {
     const chord = wait.chords[c.chord];
-    const onset = onsetOf(c);
+    const times = [...c.presses.values()].map((p) => p.t);
     const a = anchors.at(-1);
     if (a) {
       const at = a.realMs + (chord.onMs - a.onMs) / speed;
+      const tol = (opts.within * chord.events[0].beatMs) / speed;
       expectedAt.set(c.chord, at);
-      if (onset - at <= (opts.pauseBeats * chord.events[0].beatMs) / speed) continue;
+      // Every key late, or every key early: one key inside keeps the clock.
+      if (Math.min(...times) - at <= tol && Math.max(...times) - at >= -tol) continue;
     }
-    anchors.push({ realMs: onset, onMs: chord.onMs });
-    restart.set(c.chord, a ? 'pause' : 'first');
+    anchors.push({ realMs: Math.min(...times), onMs: chord.onMs });
+    restart.set(c.chord, a ? 'outside' : 'first');
   }
 
   // Real ms → ms on the score axis at this speed. Before the first anchor, the
-  // first stretch extended backwards. During a pause the clock stands at the
-  // restart chord: `stopped`.
+  // first stretch extended backwards. Once it reaches the next restart chord
+  // (playing late) it stands there, so the axis stays in order: `lateMs` is
+  // where the running clock was.
   const clock = (realMs: number) => {
     const i = Math.max(0, lastAtOrBefore(anchors, realMs, (a) => a.realMs));
     const a = anchors[i], next = anchors[i + 1];
     const ms = a.onMs / speed + (realMs - a.realMs);
-    return next && ms >= next.onMs / speed ? { ms: next.onMs / speed, stopped: true } : { ms, stopped: false };
+    return next && ms >= next.onMs / speed ? { ms: next.onMs / speed, lateMs: ms } : { ms, lateMs: ms };
   };
-  // A key or pedal held through a pause has no meaningful length.
-  const throughPause = (on: number, off: number | undefined) =>
-    off !== undefined && anchors.some((a) => a.realMs > on && a.realMs < off);
 
   const presses = new Map(keyPresses(recording).map((p) => [`${p.pitch}@${p.on}`, p]));
   const notes: PlayedNote[] = done.flatMap((c) => wait.chords[c.chord].events.map((expected): PlayedNote => {
@@ -83,8 +82,7 @@ export function analyseFollow(
       deltaMs,
       deltaPct: deltaMs === undefined ? undefined : (deltaMs / beat) * 100,
       heldMs,
-      durationPct: heldMs === undefined || written <= 0 || throughPause(press.t, key?.off)
-        ? undefined : (heldMs / written) * 100,
+      durationPct: heldMs === undefined || written <= 0 ? undefined : (heldMs / written) * 100,
       velocity: press.velocity,
       velocityPct: (press.velocity / 127) * 100,
       pedal: key?.pedal ?? false,
@@ -99,23 +97,22 @@ export function analyseFollow(
     pitch: w.pitch, onsetMs: wait.chords[w.chord].onMs / speed, velocity: w.velocity, velocityPct: (w.velocity / 127) * 100,
   }));
 
-  // The pedal against the same clock. A press keeps its real length; one that
-  // went down during a pause is untimed.
+  // The pedal against the same clock, matched where it stands, timed where it
+  // was running (a pedal pressed while late reads late, as its chord). A press
+  // keeps its real length.
   const mapped = pedalPresses(recording).map((p) => {
-    const { ms, stopped } = clock(p.on);
-    return { on: ms, off: p.off === undefined ? undefined : ms + (p.off - p.on), real: p, stopped };
+    const { ms, lateMs } = clock(p.on);
+    return { on: ms, off: p.off === undefined ? undefined : ms + (p.off - p.on), lateMs };
   });
   const firstBeat = notes[0].expected.beatMs / speed;
-  const slack = opts.pauseBeats * firstBeat;
+  const slack = opts.matchBeats * firstBeat;
   const last = wait.chords[done.at(-1)!.chord];
   const { pedals, pedalExtras, pressOf } = alignPedal(pedalMarks, mapped, speed,
-    { ...DEFAULT_ALIGN, maxOffsetBeats: opts.pauseBeats, hands: opts.hands, window: opts.window, untilMs: last.onMs / speed },
+    { ...DEFAULT_ALIGN, maxOffsetBeats: opts.matchBeats, hands: opts.hands, window: opts.window, untilMs: last.onMs / speed },
     opts.window.startMs / speed - slack, opts.window.endMs / speed + slack);
   for (const p of pedals) {
     const press = pressOf.get(p);
-    if (!press) continue;
-    if (press.stopped) { p.deltaMs = undefined; p.restart = 'pause'; }
-    if (throughPause(press.real.on, press.real.off)) p.durationPct = undefined;
+    if (press) p.deltaMs = press.lateMs - p.mark.t / speed;
   }
 
   return { notes, extras, pedals, pedalExtras, pedalReceived };

@@ -49,8 +49,8 @@ export type PlayedNote = {
   velocityPct?: number;  // velocity / 127 × 100
   pedal?: boolean;       // sustain pedal down at any time while the key was held
   // Follow: the clock started on this chord (first: played, but untimed, no
-  // deltaMs) or restarted after a stop (pause: timed late, then the clock restarts).
-  restart?: 'first' | 'pause';
+  // deltaMs) or restarted from it (outside: every key outside the criterion).
+  restart?: 'first' | 'outside';
 };
 
 // A key press that matched no note in the score.
@@ -66,7 +66,6 @@ export type PlayedPedal = {
   deltaMs?: number;      // atMs − the sign's time; negative = early
   heldMs?: number;       // down → up; undefined = still down at the end of the run
   durationPct?: number;  // heldMs as % of the written span, Ped. to *
-  restart?: 'pause';     // Follow: went down during a stop; untimed (no deltaMs)
 };
 
 // A pedal down that matched no Ped. sign in the score (its up belongs to it).

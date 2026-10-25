@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { analyseFollow, type FollowOptions } from '../src/engine/follow.ts';
 import type { ExpectedEvent, NoteEvent, PedalMark, PlayedNote, Staff } from '../src/types.ts';
 
-// Quarter notes at 120 BPM (beat = 500 ms), speed 1, the ±20 % criterion's
-// 0.5-beat window. Real time starts at T0: only differences matter.
+// Quarter notes at 120 BPM (beat = 500 ms), speed 1, the ±20 % criterion and
+// its 0.5-beat match window. Real time starts at T0: only differences matter.
 const BEAT = 500;
 const T0 = 10_000;
-const OPTS: FollowOptions = { hands: 'both', window: { startMs: -Infinity, endMs: Infinity }, pauseBeats: 0.5 };
+const OPTS: FollowOptions = { hands: 'both', window: { startMs: -Infinity, endMs: Infinity }, within: 0.2, matchBeats: 0.5 };
 
 const note = (id: string, pitch: number, onMs: number, staff: Staff = 1, dur = BEAT): ExpectedEvent => ({
   id, tiedIds: [], pitch, onMs, offMs: onMs + dur, beatMs: BEAT, staff, measure: Math.floor(onMs / (4 * BEAT)),
@@ -32,7 +32,7 @@ const playAt = (times: number[], hold = 400) => rec(...times.map((t, i) => key(6
 const byId = (notes: PlayedNote[], id: string) => notes.find((n) => n.expected.id === id)!;
 const near = (actual: number | undefined, expected: number, msg?: string) =>
   assert.ok(actual !== undefined && Math.abs(actual - expected) < 1e-6, `${msg ?? ''} ${actual} ≉ ${expected}`);
-const pauses = (notes: PlayedNote[]) => new Set(notes.filter((n) => n.restart === 'pause').map((n) => n.expected.onMs)).size;
+const restarts = (notes: PlayedNote[]) => new Set(notes.filter((n) => n.restart === 'outside').map((n) => n.expected.onMs)).size;
 
 test('steady: the first chord starts the clock, the rest are on time', () => {
   const a = analyseFollow(melody(4), playAt([0, 500, 1000, 1500]), 1, OPTS);
@@ -41,48 +41,47 @@ test('steady: the first chord starts the clock, the rest are on time', () => {
   assert.equal(a.notes[0].deltaMs, undefined);
   assert.equal(a.notes[0].status, 'played');
   for (const n of a.notes.slice(1)) { near(n.deltaMs, 0); assert.equal(n.restart, undefined); }
-  assert.equal(pauses(a.notes), 0);
+  assert.equal(restarts(a.notes), 0);
   near(a.notes[2].onsetMs, 1000, 'onset on the score axis');
 });
 
-test('late within the window: timed, and the clock does not move', () => {
-  const a = analyseFollow(melody(4), playAt([0, 500, 1150, 1500]), 1, OPTS);
-  near(byId(a.notes, 'n2').deltaPct, 30);
+test('late within the criterion: timed, and the clock does not move', () => {
+  const a = analyseFollow(melody(4), playAt([0, 500, 1075, 1500]), 1, OPTS);
+  near(byId(a.notes, 'n2').deltaPct, 15);
   near(byId(a.notes, 'n3').deltaMs, 0);
-  assert.equal(pauses(a.notes), 0);
+  assert.equal(restarts(a.notes), 0);
 });
 
-test('a stop: that chord is late, then restarts the clock; the next ones are timed from it', () => {
+test('a stop is just late: timed against the clock that was running, which then restarts', () => {
   const a = analyseFollow(melody(5), playAt([0, 500, 2500, 3000, 3550]), 1, OPTS);
   const n2 = byId(a.notes, 'n2');
-  assert.equal(n2.restart, 'pause');
-  near(n2.deltaMs, 1500, 'against the clock that was running');
+  assert.equal(n2.restart, 'outside');
+  near(n2.deltaMs, 1500);
   near(byId(a.notes, 'n3').deltaMs, 0);
   near(byId(a.notes, 'n4').deltaPct, 10);
-  assert.equal(pauses(a.notes), 1);
+  assert.equal(restarts(a.notes), 1);
 });
 
-test('the match window decides what is a pause', () => {
-  const recording = playAt([0, 500, 1200]);   // n2 40 % late
-  near(byId(analyseFollow(melody(3), recording, 1, OPTS).notes, 'n2').deltaPct, 40);
-  const strict = byId(analyseFollow(melody(3), recording, 1, { ...OPTS, pauseBeats: 0.3 }).notes, 'n2');
-  assert.equal(strict.restart, 'pause');
-  near(strict.deltaPct, 40, 'a pause is as late either way');
+test('the criterion decides where the clock restarts', () => {
+  const recording = playAt([0, 500, 1075]);   // n2 15 % late
+  const loose = byId(analyseFollow(melody(3), recording, 1, OPTS).notes, 'n2');
+  assert.equal(loose.restart, undefined);
+  const strict = byId(analyseFollow(melody(3), recording, 1, { ...OPTS, within: 0.1 }).notes, 'n2');
+  assert.equal(strict.restart, 'outside');
+  near(strict.deltaPct, 15, 'as late either way');
 });
 
-test('drift is not forgiven: lateness grows until a pause', () => {
+test('drift builds up to the criterion, then the clock restarts', () => {
   const a = analyseFollow(melody(6), playAt([0, 575, 1150, 1725, 2300, 2875]), 1, OPTS);
-  const pct = a.notes.map((n) => n.deltaPct);
-  near(pct[1], 15); near(pct[2], 30); near(pct[3], 45);
-  assert.equal(a.notes[4].restart, 'pause');
-  near(pct[4], 60, 'the pause shows the worst of it');
-  near(pct[5], 15);
+  assert.deepEqual(a.notes.map((n) => n.deltaPct === undefined ? undefined : Math.round(n.deltaPct)), [undefined, 15, 30, 15, 30, 15]);
+  assert.deepEqual(a.notes.map((n) => n.restart), ['first', undefined, 'outside', undefined, 'outside', undefined]);
 });
 
-test('early is timed, never a pause', () => {
-  const a = analyseFollow(melody(3), playAt([0, 500, 650]), 1, OPTS);
+test('early restarts the clock too', () => {
+  const a = analyseFollow(melody(4), playAt([0, 500, 650, 1150]), 1, OPTS);
   near(byId(a.notes, 'n2').deltaPct, -70);
-  assert.equal(pauses(a.notes), 0);
+  assert.equal(byId(a.notes, 'n2').restart, 'outside');
+  near(byId(a.notes, 'n3').deltaMs, 0);
 });
 
 test('each note of a chord is timed on its own', () => {
@@ -92,21 +91,21 @@ test('each note of a chord is timed on its own', () => {
   near(byId(a.notes, 'r1').deltaMs, 20);
 });
 
-test('chord onset is its earliest key: a hand found late is not a pause, but reads late', () => {
+test('only a chord all outside restarts the clock: a hand found late reads late, the clock stays', () => {
   const score = [note('l0', 48, 0, 2), note('r0', 60, 0), note('l1', 50, 500, 2), note('r1', 62, 500)];
   const recording = rec(key(48, 0), key(60, 0), key(50, 500, 1200), key(62, 1500));
   const a = analyseFollow(score, recording, 1, OPTS);
-  assert.equal(pauses(a.notes), 0);
+  assert.equal(restarts(a.notes), 0);
   near(byId(a.notes, 'r1').deltaPct, 200);
 });
 
-test('duration: real held time; none for a key held through a pause; the last chord measured', () => {
+test('duration: real held time, through a restart too; the last chord measured', () => {
   const recording = rec(key(60, 0, 250), key(61, 500, 2100), key(62, 2500, 250));   // n2 after a stop
   const a = analyseFollow(melody(3), recording, 1, OPTS);
   near(byId(a.notes, 'n0').durationPct, 50);
   const n1 = byId(a.notes, 'n1');
   near(n1.heldMs, 2100);
-  assert.equal(n1.durationPct, undefined);
+  near(n1.durationPct, 420);
   near(byId(a.notes, 'n2').heldMs, 250);
 });
 
@@ -147,11 +146,10 @@ test('a re-struck key counts with the press that completed the chord', () => {
 
 test('the practice speed sets the clock: the same playing, judged at another bpm', () => {
   const recording = playAt([0, 500, 1000]);
+  near(byId(analyseFollow(melody(3), recording, 1, OPTS).notes, 'n1').deltaPct, 0);
   const slow = analyseFollow(melody(3), recording, 0.5, OPTS);   // beat = 1000 real ms
   near(byId(slow.notes, 'n1').deltaPct, -50);
-  assert.equal(pauses(slow.notes), 0);
   const fast = analyseFollow(melody(3), recording, 2, OPTS);     // beat = 250 real ms
-  assert.equal(byId(fast.notes, 'n1').restart, 'pause');
   near(byId(fast.notes, 'n1').deltaPct, 100);
 });
 
@@ -173,20 +171,19 @@ test('pedal before the first chord reads as early', () => {
   near(a.pedals[0].deltaMs, -100);
 });
 
-test('pedal down during a pause is untimed; held through one, it has no duration %', () => {
+test('pedal down while late reads late, as its chord; held through a restart, measured', () => {
   // n2 after a stop: expected at 1000, played at 2500.
   const times = [0, 500, 2500, 3000];
   const during = analyseFollow(melody(4), rec(playAt(times), pedal(2000, 2900)), 1, OPTS,
     [mark('p0', true, 1000), mark('p1', false, 1500)]);
-  assert.equal(during.pedals[0].restart, 'pause');
-  assert.equal(during.pedals[0].deltaMs, undefined);
+  near(during.pedals[0].deltaMs, 1000, 'against the clock that was running');
   near(during.pedals[0].heldMs, 900);
 
   const through = analyseFollow(melody(4), rec(playAt(times), pedal(500, 2900)), 1, OPTS,
     [mark('p0', true, 500), mark('p1', false, 1500)]);
   near(through.pedals[0].deltaMs, 0);
   near(through.pedals[0].heldMs, 2400, 'real ms, not the clock\'s');
-  assert.equal(through.pedals[0].durationPct, undefined);
+  near(through.pedals[0].durationPct, 240);
 });
 
 test('nothing completed: an empty report', () => {
