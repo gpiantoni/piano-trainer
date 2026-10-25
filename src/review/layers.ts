@@ -69,9 +69,10 @@ export type Context = {
   beatMs?: number;          // one beat in real ms at the run's speed, at the start
   offset: Offset;
   biasMs: number;           // offset.ms when re-center is on and there's enough data; 0 otherwise
+  follow: boolean;          // a Follow run: no missed notes, untimed restarts, no re-center
 };
 
-export function context(a: Alignment, s: ReviewSettings, speed: number, offset: Offset): Context {
+export function context(a: Alignment, s: ReviewSettings, speed: number, offset: Offset, follow = false): Context {
   const first = a.notes[0]?.expected.beatMs;
   const beatMs = first ? first / speed : undefined;
   const v = a.notes.flatMap((n) => (n.velocityPct === undefined ? [] : [n.velocityPct]));
@@ -81,8 +82,8 @@ export function context(a: Alignment, s: ReviewSettings, speed: number, offset: 
     if (hi - lo < 2) { velocityLo = Math.max(0, lo - 5); velocityHi = Math.min(100, hi + 5); }
     else { velocityLo = lo; velocityHi = hi; }
   }
-  const biasMs = s.recenter ? offset.ms ?? 0 : 0;
-  return { velocityLo, velocityHi, speed, beatMs, offset, biasMs };
+  const biasMs = s.recenter && !follow ? offset.ms ?? 0 : 0;
+  return { velocityLo, velocityHi, speed, beatMs, offset, biasMs, follow };
 }
 
 // A timing offset from the (re-centered) zero: ms, and % of its beat.
@@ -102,7 +103,7 @@ function position(n: PlayedNote, s: ReviewSettings, c: Context): number | undefi
     case 'pedal':
       return undefined;
     case 'notes':
-      return (timingScale(timing(n, c).pct, s) + 1) / 2;
+      return n.deltaMs === undefined ? undefined : (timingScale(timing(n, c).pct, s) + 1) / 2;
     case 'duration':
       return n.durationPct === undefined ? undefined : n.durationPct / s.durationMax;
     case 'velocity':
@@ -118,7 +119,7 @@ export function colorFor(n: PlayedNote, s: ReviewSettings, c: Context): string {
 
 // A played note further from the (re-centered) score time than the criterion.
 export function outside(n: PlayedNote, s: ReviewSettings, c: Context): 'early' | 'late' | undefined {
-  if (n.status !== 'played') return undefined;
+  if (n.status !== 'played' || n.deltaMs === undefined) return undefined;
   const { pct } = timing(n, c);
   if (Math.abs(pct) <= s.within * 100) return undefined;
   return pct < 0 ? 'early' : 'late';
@@ -214,6 +215,7 @@ function byHand(notes: PlayedNote[], value: (n: PlayedNote) => number | undefine
 
 // The run's own offset, and whether the window and timing are centred on it.
 function offsetPart(s: ReviewSettings, c: Context): string[] {
+  if (c.follow) return [];
   const { ms, notes } = c.offset;
   if (ms === undefined) return s.recenter ? [`re-center needs ≥ ${OFFSET_MIN_NOTES} timed notes (${notes})`] : [];
   const pct = c.beatMs ? `${signed((ms / c.beatMs) * 100, 1)} % ` : '';
@@ -224,17 +226,23 @@ const withinLabel = (s: ReviewSettings) => `within ±${Math.round(s.within * 100
 
 // Counted over every note in the report, missed ones included: the match
 // window is wider than the criterion, so "within" is not already a given.
+// Untimed notes (Follow's restarts) are neither within, early nor late.
 export function counts(a: Alignment, s: ReviewSettings, c: Context) {
-  let within = 0, early = 0, late = 0, missed = 0;
+  let within = 0, early = 0, late = 0, missed = 0, untimed = 0;
   for (const n of a.notes) {
     if (n.status !== 'played') { missed++; continue; }
+    if (n.deltaMs === undefined) { untimed++; continue; }
     const o = outside(n, s, c);
     if (o === 'early') early++;
     else if (o === 'late') late++;
     else within++;
   }
-  return { within, early, late, missed, total: a.notes.length };
+  return { within, early, late, missed, untimed, total: a.notes.length };
 }
+
+// Follow: chords where the clock restarted after a stop.
+export const pauses = (a: Alignment) =>
+  new Set(a.notes.filter((n) => n.restart === 'pause').map((n) => n.expected.onMs)).size;
 
 export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
   const played = a.notes.filter((n) => n.status === 'played');
@@ -243,18 +251,20 @@ export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
       const k = counts(a, s, c);
       const wrong = a.notes.filter((n) => n.wrongPitch !== undefined).length;
       const extras = a.extras.filter((x) => !x.wrongFor).length;
-      const parts = [
-        `${k.within} / ${k.total} ${withinLabel(s)}`, `${k.early} early`, `${k.late} late`,
-        `${k.missed} missed${wrong ? ` (${wrong} wrong key)` : ''}`, `${extras} extra`,
-      ];
-      if (!played.length) return [...parts, ...offsetPart(s, c)].join(' · ');
+      const parts = [`${k.within} / ${k.total} ${withinLabel(s)}`, `${k.early} early`, `${k.late} late`];
+      if (c.follow) {
+        const p = pauses(a);
+        parts.push(`${p} pause${p === 1 ? '' : 's'}`, `${extras} wrong key${extras === 1 ? '' : 's'}`);
+      } else parts.push(`${k.missed} missed${wrong ? ` (${wrong} wrong key)` : ''}`, `${extras} extra`);
+      const timed = played.filter((n) => n.deltaMs !== undefined);
+      if (!timed.length) return [...parts, ...offsetPart(s, c)].join(' · ');
       const fmt = (ns: PlayedNote[]) => {
         const t = ns.map((n) => timing(n, c));
         return `${signed(quantile(t.map((x) => x.pct), 0.5))} % (${signed(quantile(t.map((x) => x.ms), 0.5))} ms)`;
       };
-      const rh = played.filter((n) => n.expected.staff === 1);
-      const lh = played.filter((n) => n.expected.staff === 2);
-      parts.push(`median ${fmt(played)}`);
+      const rh = timed.filter((n) => n.expected.staff === 1);
+      const lh = timed.filter((n) => n.expected.staff === 2);
+      parts.push(`median ${fmt(timed)}`);
       if (rh.length && lh.length) parts.push(`RH ${fmt(rh)}`, `LH ${fmt(lh)}`);
       if (c.beatMs) parts.push(`1 beat = ${Math.round(c.beatMs)} ms`);
       return [...parts, ...offsetPart(s, c)].join(' · ');
@@ -265,8 +275,8 @@ export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
       return byHand(played, (n) => n.velocityPct, (x) => `${x.toFixed(0)} %`);
     case 'pedal': {
       if (!a.pedals.length) return 'no pedal signs in these bars';
-      const down = a.pedals.filter((p) => p.deltaMs !== undefined);
-      const t = down.map((p) => pedalTiming(p, c));
+      const down = a.pedals.filter((p) => p.atMs !== undefined);
+      const t = down.filter((p) => p.deltaMs !== undefined).map((p) => pedalTiming(p, c));
       const held = down.flatMap((p) => (p.durationPct === undefined ? [] : [p.durationPct]));
       const parts = [`down ${down.length} / ${a.pedals.length}`];
       if (t.length) parts.push(`${t.filter((x) => Math.abs(x.pct) <= s.within * 100).length} ${withinLabel(s)}`);
@@ -289,10 +299,11 @@ export function describe(n: PlayedNote, s: ReviewSettings, c: Context): string {
   if (n.status !== 'played') {
     return n.wrongPitch !== undefined ? `${name} · missed (played ${pitchName(n.wrongPitch)})` : `${name} · missed`;
   }
-  const t = timing(n, c);
   const parts = [
     name,
-    `${signed(t.ms)} ms (${signed(t.pct)} % of beat)`,
+    n.restart === 'first' ? 'clock started here'
+      : n.restart === 'pause' ? 'clock restarted here (pause)'
+      : ((t) => `${signed(t.ms)} ms (${signed(t.pct)} % of beat)`)(timing(n, c)),
     n.heldMs === undefined ? 'still held' : `held ${n.heldMs.toFixed(0)} ms (${n.durationPct?.toFixed(0) ?? '—'} %)`,
     `vel ${n.velocityPct!.toFixed(0)} %`,
   ];
@@ -309,9 +320,13 @@ const held = (p: PlayedPedal) => (p.heldMs === undefined
 
 export function describePedal(ends: PlayedPedal | undefined, starts: PlayedPedal | undefined, c: Context): string {
   const parts: string[] = [];
-  if (ends) parts.push(ends.deltaMs === undefined ? 'pedal up (*) · pedal wasn\'t down' : `pedal up (*) · ${held(ends)}`);
+  if (ends) parts.push(ends.atMs === undefined ? 'pedal up (*) · pedal wasn\'t down' : `pedal up (*) · ${held(ends)}`);
   if (starts) {
-    if (starts.deltaMs === undefined) parts.push('pedal down (Ped.) · missed');
+    if (starts.atMs === undefined) parts.push('pedal down (Ped.) · missed');
+    else if (starts.deltaMs === undefined) {
+      parts.push('pedal down (Ped.) · during a pause');
+      if (!starts.end) parts.push(held(starts));
+    }
     else {
       const t = pedalTiming(starts, c);
       parts.push(`pedal down (Ped.) · ${signed(t.ms)} ms (${signed(t.pct)} % of beat)`);

@@ -199,19 +199,21 @@ export function align(
     }
   }
 
-  return { notes, extras, ...alignPedal(pedalMarks, recording, speed, opts, from, to) };
+  const { pedals, pedalExtras } = alignPedal(pedalMarks, pedalPresses(recording), speed, opts, from, to);
+  return { notes, extras, pedals, pedalExtras, pedalReceived: recording.some((e) => e.type === 'pedal') };
 }
 
 // Pedal signs, like the notes of one pitch: each Ped. with the pedal going
 // down, in order, within the same match window; the * that ends its span with
 // the pedal's next lift, for how long it was held. Not tied to a hand.
-function alignPedal(
-  marks: PedalMark[], recording: NoteEvent[], speed: number, opts: AlignOptions, from: number, to: number,
-): Pick<Alignment, 'pedals' | 'pedalExtras' | 'pedalReceived'> {
-  const presses = pedalPresses(recording);
+// Presses unmatched in [from, to) are extras. `pressOf`: the press each played
+// sign got, for callers that pass presses carrying more than on/off.
+export function alignPedal<P extends { on: number; off?: number }>(
+  marks: PedalMark[], presses: P[], speed: number, opts: AlignOptions, from: number, to: number,
+): Pick<Alignment, 'pedals' | 'pedalExtras'> & { pressOf: Map<PlayedPedal, P> } {
   const downs = marks.filter((m) => m.down);
-  const played = new Map<PedalMark, { on: number; off?: number }>();
-  const used = new Set<{ on: number; off?: number }>();
+  const played = new Map<PedalMark, P>();
+  const used = new Set<P>();
   if (downs.length && presses.length) {
     const match = alignTimes(
       downs.map((m) => ({ t: m.t / speed, beat: m.beatMs / speed })), presses.map((p) => p.on), opts.maxOffsetBeats, opts.biasMs,
@@ -225,9 +227,10 @@ function alignPedal(
 
   // In the section: a Ped. from its first downbeat until its last barline.
   const { startMs, endMs } = opts.window;
+  const pressOf = new Map<PlayedPedal, P>();
   const pedals: PlayedPedal[] = downs
     .filter((m) => m.t >= startMs - 1e-6 && m.t < endMs - 1e-6 && (m.t / speed <= opts.untilMs || played.has(m)))
-    .map((mark) => {
+    .map((mark): PlayedPedal => {
       // Marks are sorted with an up before a down at the same time: the first
       // up after this down, even a change sign sharing its time with the next Ped.
       const end = marks.find((m) => !m.down && m.t > mark.t);
@@ -235,15 +238,17 @@ function alignPedal(
       if (!press) return { mark, end };
       const heldMs = press.off === undefined ? undefined : press.off - press.on;
       const written = end && (end.t - mark.t) / speed;
-      return {
+      const pedal = {
         mark, end, atMs: press.on, deltaMs: press.on - mark.t / speed, heldMs,
         durationPct: heldMs === undefined || !written ? undefined : (heldMs / written) * 100,
       };
+      pressOf.set(pedal, press);
+      return pedal;
     });
   const pedalExtras = presses
     .filter((p) => !used.has(p) && p.on >= from && p.on < to)
     .map((p) => ({ atMs: p.on, heldMs: p.off === undefined ? undefined : p.off - p.on }));
-  return { pedals, pedalExtras, pedalReceived: recording.some((e) => e.type === 'pedal') };
+  return { pedals, pedalExtras, pressOf };
 }
 
 // Below this many timed notes, a run's typical offset is too noisy to zero against.

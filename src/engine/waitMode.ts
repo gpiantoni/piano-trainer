@@ -12,6 +12,16 @@ export const forHands = (hands: Hands) => (ev: ExpectedEvent) =>
 
 export type Chord = { onMs: number; events: ExpectedEvent[] };
 
+// A key press: when it went down, and how hard.
+export type Press = { t: number; velocity: number };
+
+// A chord completed: for each of its pitches, the press that was down when the
+// last of them went down (a re-struck key counts with its latest press).
+export type Completion = { chord: number; presses: Map<number, Press> };
+
+// A key not in the chord being asked for.
+export type Wrong = { pitch: number; t: number; velocity: number; chord: number };
+
 export type Feedback =
   | { kind: 'advance'; chord: number }
   | { kind: 'wrong'; pitch: number; expected: number[] }
@@ -31,7 +41,10 @@ export class WaitMode {
   readonly chords: Chord[];
   cursor = 0;
   wrong = 0;
-  private held = new Set<number>();   // chord pitches pressed since it came up, still down
+  // What happened, for Follow mode's analysis after the run.
+  readonly completions: Completion[] = [];
+  readonly wrongs: Wrong[] = [];
+  private held = new Map<number, Press>();   // chord pitches pressed since it came up, still down
 
   private muted: ExpectedEvent[];
 
@@ -72,25 +85,30 @@ export class WaitMode {
 
     // A unison (both hands on one pitch) is satisfied by a single key.
     if (chord.events.some((e) => e.pitch === ev.pitch)) {
-      this.held.add(ev.pitch);
+      this.held.set(ev.pitch, { t: ev.t, velocity: ev.velocity });
       if (this.expected.length) return [];
+      this.completions.push({ chord: this.cursor, presses: this.held });
       this.enter(this.cursor + 1);
       return [this.done ? { kind: 'done' } : { kind: 'advance', chord: this.cursor }];
     }
 
     this.wrong++;
+    this.wrongs.push({ pitch: ev.pitch, t: ev.t, velocity: ev.velocity, chord: this.cursor });
     return [{ kind: 'wrong', pitch: ev.pitch, expected: this.expected }];
   }
 
   restart() {
     this.wrong = 0;
+    this.completions.length = 0;
+    this.wrongs.length = 0;
     this.enter(0);
   }
 
   private enter(index: number) {
     this.cursor = index;
-    // Keys still down from the chord before must be struck again.
-    this.held = new Set();
+    // Keys still down from the chord before must be struck again. A new map:
+    // the old one is kept by the completion.
+    this.held = new Map();
   }
 }
 

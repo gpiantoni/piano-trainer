@@ -49,3 +49,19 @@ test('wait mode: one hand asks only for its own notes', () => {
   assert.deepEqual(w.handle(on(45)), [{ kind: 'advance', chord: 1 }]);
   assert.equal(w.noteStates().get('c4'), 'muted');
 });
+
+test('wait mode: records which press completed each chord, and the wrong keys', () => {
+  const w = new WaitMode(score);
+  const at = (type: 'on' | 'off', pitch: number, t: number, velocity = 64): NoteEvent => ({ type, pitch, velocity, t });
+  w.handle(at('on', 45, 0)); w.handle(at('on', 60, 5, 50));
+  w.handle(at('off', 60, 20)); w.handle(at('on', 60, 30, 70));   // re-struck: the later press counts
+  w.handle(at('on', 62, 35));
+  w.handle(at('on', 64, 40));
+  assert.equal(w.completions.length, 1);
+  assert.equal(w.completions[0].chord, 0);
+  assert.deepEqual(w.completions[0].presses.get(60), { t: 30, velocity: 70 });
+  assert.deepEqual(w.completions[0].presses.get(45), { t: 0, velocity: 64 });
+  assert.deepEqual(w.wrongs, [{ pitch: 62, t: 35, velocity: 64, chord: 0 }]);
+  w.restart();
+  assert.deepEqual([w.completions.length, w.wrongs.length], [0, 0]);
+});

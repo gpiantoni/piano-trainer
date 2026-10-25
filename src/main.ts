@@ -7,6 +7,7 @@ import { WaitMode, forHands, noteName, type Feedback } from './engine/waitMode.t
 import { Metronome } from './engine/metronome.ts';
 import { TempoRun } from './engine/tempoRun.ts';
 import { OFFSET_MIN_NOTES, align, runOffset } from './engine/align.ts';
+import { analyseFollow } from './engine/follow.ts';
 import { CALIBRATION, estimateLatency } from './engine/calibration.ts';
 import { ReviewView } from './review/view.ts';
 import { WIDEST_WINDOW } from './review/palettes.ts';
@@ -30,6 +31,7 @@ app.innerHTML = `
       <span class="group m">
         <div class="seg" id="modes" role="radiogroup" aria-label="Mode">
           <button data-mode="wait" role="radio">Wait</button>
+          <button data-mode="follow" role="radio">Follow</button>
           <button data-mode="tempo" role="radio">Tempo</button>
         </div>
         <div class="seg" id="hands" role="radiogroup" aria-label="Hands">
@@ -123,8 +125,8 @@ const BPM_STEP = 5, BPM_MIN = 10, SPEED_MAX = 1.5;
 let practiceBpm = 0;
 let speed = 1;
 
-type Mode = 'wait' | 'tempo';
-let mode: Mode = oneOf(['wait', 'tempo'], store.get('mode'), 'wait');
+type Mode = 'wait' | 'follow' | 'tempo';
+let mode: Mode = oneOf(['wait', 'follow', 'tempo'], store.get('mode'), 'wait');
 let hands: Hands = oneOf(['both', 'right', 'left'], store.get('hands'), 'both');
 
 let entries: ScoreEntry[] = [];
@@ -134,12 +136,17 @@ let laidOutWidth = 0;
 let timing: ScoreTiming | undefined;
 let practice: WaitMode | undefined;
 let run: TempoRun | undefined;
+// A Follow run: played like wait mode, every event recorded (t in real ms from
+// its first) and timed afterwards. `down`: keys held now; the run ends when the
+// last chord is done and they are all up.
+let followRun: { t0: number; recording: NoteEvent[]; down: Set<number> } | undefined;
 let cursorMap: CursorMap | undefined;
 let latencyMs = Number(store.get('latencyMs')) || 0;
 let section: Section | undefined;   // some bars only; remembered per score
 
-// The last finished tempo run, kept for re-analysis and download.
+// The last finished tempo or Follow run, kept for re-analysis and download.
 type LastRun = {
+  mode: 'tempo' | 'follow';
   recording: NoteEvent[]; speed: number; latencyMs: number; recordedAt: string; untilMs: number;
   window: PlayWindow;
 };
@@ -166,7 +173,8 @@ let noteEls = new Map<string, Element>();
 let followedSystem: Element | null = null;
 
 function paint() {
-  const states = mode === 'wait' ? practice?.noteStates() : undefined;
+  // Follow plays like wait mode; its review replaces the greens.
+  const states = mode === 'wait' || (mode === 'follow' && !review.active) ? practice?.noteStates() : undefined;
   const inPlay = forHands(hands);
   const w = timing && playWindow(timing, section);
   const muted = new Set(timing?.events
@@ -177,7 +185,7 @@ function paint() {
     el.classList.toggle('hit', s === 'hit');
     el.classList.toggle('muted', muted.has(id));
   }
-  $('progress').textContent = mode !== 'wait' || !practice ? ''
+  $('progress').textContent = mode === 'tempo' || !practice ? ''
     : practice.done ? `Done · ${practice.wrong} wrong`
     : `${practice.cursor} / ${practice.chords.length} played · ${practice.wrong} wrong`;
   drawCount();
@@ -193,7 +201,7 @@ function scrollToSystem(system: Element | null, force = false) {
   window.scrollBy({ top: top - barBottom - 12, behavior: 'smooth' });
 }
 
-function follow(force = false) {
+function scrollToCurrent(force = false) {
   if (mode === 'tempo') {
     if (run) scrollToSystem(cursorSystem(), force);
     return;
@@ -236,12 +244,55 @@ function onNote(ev: NoteEvent) {
     return;
   }
   if (!practice) return;
+  if (mode === 'follow') {
+    // A run starts from the top. Reviewing: nothing until Restart. A run cut
+    // short without a review (Bars, Library): the next key starts over.
+    if (!followRun && review.active) return;
+    if (!followRun && (practice.cursor > 0 || practice.wrong > 0)) restart();
+    if (!recordFollow(ev)) return;
+  }
   const out = practice.handle(ev);
+  // Follow ends once the last chord is let go, so its durations are measured.
+  if (mode === 'follow' && practice.done && followRun?.down.size === 0) return finishFollow();
   if (out.length === 0) return;
   // The end needs no message: the progress already reads "Done · N wrong".
   for (const f of out) if (f.kind === 'wrong') flashWrong(f);
   paint();
-  follow();
+  scrollToCurrent();
+}
+
+// ---- follow mode ------------------------------------------------------------
+
+// Records one event of a Follow run; the first key or pedal down starts it.
+// False: not part of a run (a key-up left over from before).
+function recordFollow(ev: NoteEvent): boolean {
+  if (!followRun) {
+    if (ev.type === 'off' || (ev.type === 'pedal' && !ev.down)) return false;
+    followRun = { t0: ev.t, recording: [], down: new Set() };
+    startStop.textContent = 'Stop';
+    startStop.classList.add('running');
+    startStop.hidden = false;
+    keepAwake();
+  }
+  followRun.recording.push({ ...ev, t: ev.t - followRun.t0 });
+  if (ev.type === 'on') followRun.down.add(ev.pitch);
+  else if (ev.type === 'off') followRun.down.delete(ev.pitch);
+  return true;
+}
+
+// The last chord let go, or Stop: review the chords played so far.
+function finishFollow() {
+  const finished = followRun;
+  stopRun();
+  if (!finished || !timing || !practice) return;
+  if (practice.completions.length === 0) return restart();
+  lastRun = {
+    mode: 'follow', recording: finished.recording, speed, untilMs: Infinity,
+    latencyMs: 0, recordedAt: new Date().toISOString(), window: playWindow(timing, section),
+  };
+  analyse();
+  paint();
+  scrollToStart();
 }
 
 // The notes wait mode asks for: the section's, or the whole piece.
@@ -414,7 +465,8 @@ function lightCount(i: number | undefined) {
 // the lock whenever the page is hidden, so it is taken again on return.
 let wakeLock: Promise<WakeLockSentinel | undefined> | undefined;
 function keepAwake() {
-  const want = document.visibilityState === 'visible' && (run !== undefined || document.fullscreenElement !== null);
+  const want = document.visibilityState === 'visible'
+    && (run !== undefined || followRun !== undefined || document.fullscreenElement !== null);
   if (want && !wakeLock) {
     const lock = navigator.wakeLock?.request('screen').catch(() => undefined);
     wakeLock = lock;
@@ -450,7 +502,7 @@ function tick() {
   const t = run.scoreTime(now);
   drawCursor(Math.max(run.window.startMs, t));
   lightCount(phase === 'countIn' ? lastAtOrBefore(countClicks, now, (c) => run!.realAt(c.t)) : undefined);
-  follow();
+  scrollToCurrent();
   frame = requestAnimationFrame(tick);
 }
 
@@ -459,9 +511,11 @@ function stopRun() {
   metronome.stop();
   run?.stop();
   run = undefined;
+  followRun = undefined;
   keepAwake();
   startStop.textContent = 'Start';
   startStop.classList.remove('running');
+  if (mode === 'follow') startStop.hidden = true;   // shown only while a Follow run plays
   cursor.hidden = true;
   lightCount(undefined);
 }
@@ -473,7 +527,7 @@ function finishRun() {
   stopRun();
   if (!finished || !reachedMusic) return;
   lastRun = {
-    recording: finished.recording, speed: finished.speed, untilMs,
+    mode: 'tempo', recording: finished.recording, speed: finished.speed, untilMs,
     latencyMs: finished.latencyMs, recordedAt: new Date().toISOString(), window: finished.window,
   };
   analyse();
@@ -488,6 +542,15 @@ function finishRun() {
 // from the run, not from the chosen window.
 function analyse() {
   if (!lastRun || !timing) return;
+  if (lastRun.mode === 'follow') {
+    // Untimed restarts instead of a run-wide offset: no re-center.
+    const { recording, speed: runSpeed, window } = lastRun;
+    const events = timing.events.filter((ev) => inWindow(window, ev.onMs));
+    const a = analyseFollow(events, recording, runSpeed, { hands, window, pauseBeats: review.window }, timing.pedals);
+    lastOffset = undefined;
+    review.show(a, runSpeed, { ms: undefined, notes: 0 }, true);
+    return;
+  }
   const { recenter } = review.settings;
   const maxOffsetBeats = review.window;
   const { recording, speed: runSpeed, untilMs, window } = lastRun;
@@ -515,7 +578,7 @@ function downloadRun() {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-startStop.onclick = () => (run ? finishRun() : startRun());
+startStop.onclick = () => (mode === 'follow' ? finishFollow() : run ? finishRun() : startRun());
 
 // The score's own tempo in beats per minute, at its start. `bpm` is the exact
 // quarter-note tempo; beatMs is rounded to whole ms, so use it only for the beat
@@ -541,8 +604,16 @@ function setBpm(next: number) {
 // 72 → 75 → 80 up, 72 → 70 → 65 down. The tolerance absorbs float noise in the
 // score's tempo (110.0000001 must step down to 105, not to 110).
 const steps = (bpm: number) => bpm / BPM_STEP;
-$('slower').onclick = () => setBpm((Math.ceil(steps(practiceBpm) - 1e-6) - 1) * BPM_STEP);
-$('faster').onclick = () => setBpm((Math.floor(steps(practiceBpm) + 1e-6) + 1) * BPM_STEP);
+$('slower').onclick = () => { setBpm((Math.ceil(steps(practiceBpm) - 1e-6) - 1) * BPM_STEP); retime(); };
+$('faster').onclick = () => { setBpm((Math.floor(steps(practiceBpm) + 1e-6) + 1) * BPM_STEP); retime(); };
+
+// A Follow run's clock exists only in its review: at another bpm, time it again.
+// A tempo run keeps the bpm it was played at.
+function retime() {
+  if (lastRun?.mode !== 'follow') return;
+  lastRun = { ...lastRun, speed };
+  analyse();
+}
 
 const clickButton = $<HTMLButtonElement>('click');
 function setClick(on: boolean) {
@@ -657,10 +728,12 @@ function setMode(next: Mode) {
   mode = next;
   store.set('mode', mode);
   for (const b of modeButtons) b.setAttribute('aria-checked', String(b.dataset.mode === mode));
-  $('restart').hidden = mode !== 'wait';
-  $('tempoControls').hidden = mode !== 'tempo';
+  $('restart').hidden = mode === 'tempo';
+  // Follow keeps the bpm only: no metronome, and latency cancels out.
+  $('tempoControls').hidden = mode === 'wait';
+  for (const id of ['click', 'subdivide', 'latency']) $(id).hidden = mode !== 'tempo';
   startStop.hidden = mode !== 'tempo';
-  waitFeedback.hidden = mode !== 'wait';
+  waitFeedback.hidden = mode === 'tempo';
   restart();
 }
 for (const b of modeButtons) b.onclick = () => setMode(b.dataset.mode as Mode);
@@ -677,10 +750,10 @@ function setHands(next: Hands) {
 }
 for (const b of handButtons) b.onclick = () => setHands(b.dataset.hands as Hands);
 
-// Space starts/stops a tempo run from a computer keyboard.
+// Space starts/stops a tempo run, or stops a Follow run, from a computer keyboard.
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Escape' && picking) { endPicking(); return; }
-  if (e.code !== 'Space' || mode !== 'tempo' || picking || calib.open || library.dialog.open || (e.target as HTMLElement).matches('select, input')) return;
+  if (e.code !== 'Space' || mode === 'wait' || picking || calib.open || library.dialog.open || (e.target as HTMLElement).matches('select, input')) return;
   e.preventDefault();
   startStop.click();
 });
@@ -760,7 +833,7 @@ function setScale(next: number) {
   scale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, next));
   $('zoomLevel').textContent = `${scale}`;
   store.set('scale', String(scale));
-  layout().then(() => follow(true));
+  layout().then(() => scrollToCurrent(true));
 }
 $('zoomOut').onclick = () => setScale(scale - SCALE_STEP);
 $('zoomIn').onclick = () => setScale(scale + SCALE_STEP);
@@ -772,7 +845,7 @@ let resizeTimer: number | undefined;
 new ResizeObserver(() => {
   clearTimeout(resizeTimer);
   resizeTimer = window.setTimeout(() => {
-    if (score.clientWidth !== laidOutWidth) layout().then(() => follow(true));
+    if (score.clientWidth !== laidOutWidth) layout().then(() => scrollToCurrent(true));
   }, 150);
 }).observe(score);
 
@@ -862,15 +935,16 @@ if (import.meta.env.DEV) {
     __cursor: () => cursorMap,
     __review: () => review,
     // Feed a recording as if a run just finished, e.g. from a saved run file.
-    // `untilMs` (real ms from t0) simulates stopping the run early.
-    __replay: (recording: NoteEvent[], runSpeed = speed, untilMs = Infinity) => {
-      if (mode !== 'tempo') setMode('tempo');
+    // `untilMs` (real ms from t0) simulates stopping a tempo run early.
+    __replay: (recording: NoteEvent[], runSpeed = speed, untilMs = Infinity, runMode: 'tempo' | 'follow' = 'tempo') => {
+      if (mode !== runMode) setMode(runMode);
       if (!timing) return;
       lastRun = {
-        recording, speed: runSpeed, latencyMs: 0, recordedAt: new Date().toISOString(), untilMs,
+        mode: runMode, recording, speed: runSpeed, latencyMs: 0, recordedAt: new Date().toISOString(), untilMs,
         window: playWindow(timing, section),
       };
       analyse();
+      paint();
     },
     __timing: () => timing,
   });

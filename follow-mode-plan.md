@@ -143,14 +143,15 @@ A unison (both hands on one pitch) gives both events the same press.
 
 **State**
 - Reuse `practice: WaitMode` for live play.
-- Add `let followRun: { t0: number; recording: NoteEvent[]; down: Set<number>; ending: boolean } | undefined`.
-- `t0` = the `t` of the first event received after `restart()`. `down` tracks the keys currently held, to know when the last chord is let go.
+- Add `let followRun: { t0: number; recording: NoteEvent[]; down: Set<number> } | undefined`.
+- `t0` = the `t` of the first key or pedal down after `restart()`. `down` tracks the keys currently held, to know when the last chord is let go.
 
 **`onNote`**
 - In Follow, while a review is shown: ignore everything until Restart. After a Stop mid-way, `practice` is not done and would otherwise keep advancing.
+- A run cut short without a review (Bars, Library, or Stop before any chord): the next key restarts from the top.
 - Otherwise: `followRun.recording.push({ ...ev, t: ev.t - t0 })` for every event, including pedal and wrong keys, and update `down`.
 - Then the existing wait handling (`practice.handle`, `flashWrong`, `paint`, `scrollToCurrent()`).
-- When `practice.done`, set `ending`. Once `ending` and `down` is empty, call `finishFollow()`.
+- Once `practice.done` and `down` is empty, call `finishFollow()`.
 
 **`finishFollow()`** (also bound to Stop, and to Space in Follow)
 - If at least one chord completed: set `lastRun = { mode: 'follow', recording, speed, latencyMs: 0, recordedAt, untilMs: Infinity, window: playWindow(timing, section) }`, call `analyse()`, then `scrollToStart()`.
@@ -203,8 +204,9 @@ Use the helpers from `waitMode.test.ts`, with `beatMs: 500`, `speed: 1`, `pauseB
 12. **Stopped early**: only completed chords are reported.
 13. **Pedal**: Ped. on time → `deltaMs ≈ 0` via the clock map. A pedal down during a pause → untimed, `restart: 'pause'`. A pedal held through a pause → real `heldMs`, `durationPct` undefined. A pedal before the first chord reads as early.
 14. **Unison**: both hands on one pitch → both events get the same press.
-15. **Recorded order**: an on and an off with the same `t` replay as received.
-16. **Bpm**: the same recording at a slower `speed` gives later expected times and different pauses.
+15. **Re-struck key**: timed from the press that completed the chord.
+16. **A hand found late**: not a pause, the late hand reads late (see open questions).
+17. **Bpm**: the same recording at a slower `speed` gives later expected times and different pauses.
 
 Run `npm test` and `npm run build` (tsc must pass).
 

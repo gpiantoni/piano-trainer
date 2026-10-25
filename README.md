@@ -41,6 +41,18 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   chord played one note at a time doesn't count. A wrong key flashes the notes
   not yet down red and does not advance.
 
+  **Follow mode**: plays exactly like wait mode, with no metronome, but the run
+  is timed afterwards against a clock at the set bpm (−/+). The clock starts on
+  the first chord and is never nudged towards you, so dragging or rushing shows.
+  A chord later than the match window (50 % of a beat at the ±20 % criterion,
+  30 % at ±10 %) is a pause: it is grey, untimed, and the clock restarts there.
+  The run ends when the last chord is let go (or **Stop**), then shows the same
+  review as tempo mode, with the pauses and wrong keys in the summary. A note or
+  pedal held through a pause has no duration %. On time is the review's
+  criterion; there is no re-center, and latency calibration is not needed. −/+
+  during the review times the same playing at another bpm. **Restart** to play
+  again.
+
   **Tempo mode**: pick a tempo (−/+ in steps of 5 bpm; shown as bpm · % of the
   score's tempo · one beat in ms, remembered per score), **Start** (or Space), one bar of count-in clicks,
   then play along with the cursor; 🔔 switches the metronome off after the
@@ -64,13 +76,14 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   counts in one bar before it and stops after the last. Remembered per score;
   **✕** goes back to the whole piece.
 
-  **Both / Left / Right** picks the hand in either mode: the other staff greys
+  **Both / Left / Right** picks the hand in any mode: the other staff greys
   out and is not asked for. **Full screen** hides the browser bars on the tablet
-  and keeps the screen awake, as a tempo run does while it plays.
+  and keeps the screen awake, as a tempo or Follow run does while it plays.
 
   No piano at hand? In the dev console, `__play(67)` presses G4 and `__play(57, 60, 64)` a chord,
   `__practice().expected` lists what wait mode is waiting for, and
-  `__replay(recording, speed)` shows a saved run's `recording` in review.
+  `__replay(recording, speed)` shows a saved run's `recording` in review
+  (`__replay(recording, speed, Infinity, 'follow')` for a Follow run).
 
 Web MIDI requires a **secure context**: `localhost` or HTTPS — `file://` will not
 work.
