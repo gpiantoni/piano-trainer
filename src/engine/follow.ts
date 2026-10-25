@@ -6,7 +6,9 @@ import { lastAtOrBefore } from '../score/beats.ts';
 // After a Follow run: played like wait mode, timed afterwards against a clock at
 // the practice speed. The clock starts on the first chord and is never nudged
 // towards the player, so drift shows. A chord later than the match window is a
-// pause: the clock restarts there and that chord is untimed. Pure: no DOM, no clock.
+// pause: a stop is late, so that chord is timed against the clock that was
+// running, and then the clock restarts from it. Only the first chord is untimed.
+// Pure: no DOM, no clock.
 
 export type FollowOptions = {
   hands: Hands;
@@ -33,9 +35,10 @@ export function analyseFollow(
   const pedalReceived = recording.some((e) => e.type === 'pedal');
   if (done.length === 0) return { notes: [], extras: [], pedals: [], pedalExtras: [], pedalReceived };
 
-  // The clock, chord by chord: each chord's expected real time, or an anchor.
+  // The clock, chord by chord: each chord's expected real time; the first is
+  // an anchor only, a pause is timed and then an anchor.
   const anchors: Anchor[] = [];
-  const restart = new Map<number, 'first' | 'pause'>();   // chord index → why it's untimed
+  const restart = new Map<number, 'first' | 'pause'>();   // chord index → why the clock (re)started there
   const expectedAt = new Map<number, number>();           // chord index → real ms
   for (const c of done) {
     const chord = wait.chords[c.chord];
@@ -43,7 +46,8 @@ export function analyseFollow(
     const a = anchors.at(-1);
     if (a) {
       const at = a.realMs + (chord.onMs - a.onMs) / speed;
-      if (onset - at <= (opts.pauseBeats * chord.events[0].beatMs) / speed) { expectedAt.set(c.chord, at); continue; }
+      expectedAt.set(c.chord, at);
+      if (onset - at <= (opts.pauseBeats * chord.events[0].beatMs) / speed) continue;
     }
     anchors.push({ realMs: onset, onMs: chord.onMs });
     restart.set(c.chord, a ? 'pause' : 'first');

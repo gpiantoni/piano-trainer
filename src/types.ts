@@ -48,8 +48,8 @@ export type PlayedNote = {
   velocity?: number;     // 1–127
   velocityPct?: number;  // velocity / 127 × 100
   pedal?: boolean;       // sustain pedal down at any time while the key was held
-  // Follow: the clock started on this chord (first) or restarted after a stop
-  // (pause). Played, but untimed: no deltaMs.
+  // Follow: the clock started on this chord (first: played, but untimed, no
+  // deltaMs) or restarted after a stop (pause: timed late, then the clock restarts).
   restart?: 'first' | 'pause';
 };
 

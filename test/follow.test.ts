@@ -52,11 +52,11 @@ test('late within the window: timed, and the clock does not move', () => {
   assert.equal(pauses(a.notes), 0);
 });
 
-test('a stop: that chord restarts the clock, the next ones are timed from it', () => {
+test('a stop: that chord is late, then restarts the clock; the next ones are timed from it', () => {
   const a = analyseFollow(melody(5), playAt([0, 500, 2500, 3000, 3550]), 1, OPTS);
   const n2 = byId(a.notes, 'n2');
   assert.equal(n2.restart, 'pause');
-  assert.equal(n2.deltaMs, undefined);
+  near(n2.deltaMs, 1500, 'against the clock that was running');
   near(byId(a.notes, 'n3').deltaMs, 0);
   near(byId(a.notes, 'n4').deltaPct, 10);
   assert.equal(pauses(a.notes), 1);
@@ -65,7 +65,9 @@ test('a stop: that chord restarts the clock, the next ones are timed from it', (
 test('the match window decides what is a pause', () => {
   const recording = playAt([0, 500, 1200]);   // n2 40 % late
   near(byId(analyseFollow(melody(3), recording, 1, OPTS).notes, 'n2').deltaPct, 40);
-  assert.equal(byId(analyseFollow(melody(3), recording, 1, { ...OPTS, pauseBeats: 0.3 }).notes, 'n2').restart, 'pause');
+  const strict = byId(analyseFollow(melody(3), recording, 1, { ...OPTS, pauseBeats: 0.3 }).notes, 'n2');
+  assert.equal(strict.restart, 'pause');
+  near(strict.deltaPct, 40, 'a pause is as late either way');
 });
 
 test('drift is not forgiven: lateness grows until a pause', () => {
@@ -73,6 +75,7 @@ test('drift is not forgiven: lateness grows until a pause', () => {
   const pct = a.notes.map((n) => n.deltaPct);
   near(pct[1], 15); near(pct[2], 30); near(pct[3], 45);
   assert.equal(a.notes[4].restart, 'pause');
+  near(pct[4], 60, 'the pause shows the worst of it');
   near(pct[5], 15);
 });
 
@@ -149,6 +152,7 @@ test('the practice speed sets the clock: the same playing, judged at another bpm
   assert.equal(pauses(slow.notes), 0);
   const fast = analyseFollow(melody(3), recording, 2, OPTS);     // beat = 250 real ms
   assert.equal(byId(fast.notes, 'n1').restart, 'pause');
+  near(byId(fast.notes, 'n1').deltaPct, 100);
 });
 
 // Pedal signs: Ped. (down) and * (up).

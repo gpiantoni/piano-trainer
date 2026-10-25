@@ -58,7 +58,7 @@ test('counts cover every expected note, missed ones included', () => {
   assert.match(summary(a, strict, c), /^2 \/ 6 within ±10 % · 1 early · 1 late · 2 missed · 1 extra/);
 });
 
-test('Follow: restarts are grey and untimed; pauses and wrong keys in the summary, no re-center', () => {
+test('Follow: the first chord is grey and untimed, a pause is late; pauses and wrong keys in the summary, no median, no re-center', () => {
   const events: ExpectedEvent[] = [0, 1, 2, 3].map((i) => ({
     id: `n${i}`, tiedIds: [], pitch: 60 + i, staff: 1,
     onMs: i * BEAT, offMs: (i + 1) * BEAT, beatMs: BEAT, measure: 0,
@@ -73,11 +73,11 @@ test('Follow: restarts are grey and untimed; pauses and wrong keys in the summar
   const c = context(a, s, 1, { ms: undefined, notes: 0 }, true, 120);
   assert.equal(c.biasMs, 0);
   assert.equal(colorFor(a.notes[0], s, c), NOT_MEASURED);
-  assert.equal(colorFor(a.notes[2], s, c), NOT_MEASURED);
+  assert.notEqual(colorFor(a.notes[2], s, c), NOT_MEASURED);
   assert.notEqual(colorFor(a.notes[3], s, c), NOT_MEASURED);
-  assert.equal(outside(a.notes[2], s, c), undefined);
-  assert.deepEqual(counts(a, s, c), { within: 2, early: 0, late: 0, missed: 0, untimed: 2, total: 4 });
-  assert.equal(summary(a, s, c), '2 / 4 within ±20 % · 0 early · 0 late · 1 pause · 1 wrong key · median +5 % (+25 ms) · at 120 bpm · 1 beat = 500 ms');
+  assert.equal(outside(a.notes[2], s, c), 'late');
+  assert.deepEqual(counts(a, s, c), { within: 2, early: 0, late: 1, missed: 0, untimed: 1, total: 4 });
+  assert.equal(summary(a, s, c), '2 / 4 within ±20 % · 0 early · 1 late · 1 pause · 1 wrong key · at 120 bpm · 1 beat = 500 ms');
   assert.match(describe(a.notes[0], s, c), /^C4 · clock started here · held 100 ms/);
-  assert.match(describe(a.notes[2], s, c), /^D4 · clock restarted here \(pause\) · held/);
+  assert.match(describe(a.notes[2], s, c), /^D4 · \+1500 ms \(\+300 % of beat\) · clock restarted here \(pause\) · held/);
 });

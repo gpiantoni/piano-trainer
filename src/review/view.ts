@@ -297,7 +297,7 @@ export class ReviewView {
             className: 'key-legend',
             innerHTML: `<b class="k-arrow">◂ ▸</b> outside ±${pct(s.within)} `
               + (this.follow
-                ? '<i class="k unmoved"></i>clock restarted <b class="k-x">×</b> wrong key'
+                ? '<i class="k unmoved"></i>clock started <b class="k-x">×</b> wrong key'
                 : '<i class="k unmoved"></i>missed <b class="k-x">×</b> extra key'),
           }),
         );

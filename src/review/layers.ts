@@ -69,7 +69,7 @@ export type Context = {
   beatMs?: number;          // one beat in real ms at the run's speed, at the start
   offset: Offset;
   biasMs: number;           // offset.ms when re-center is on and there's enough data; 0 otherwise
-  follow: boolean;          // a Follow run: no missed notes, untimed restarts, no re-center
+  follow: boolean;          // a Follow run: no missed notes, an untimed first chord, no re-center
   bpm?: number;             // the run's practice tempo
 };
 
@@ -227,7 +227,7 @@ const withinLabel = (s: ReviewSettings) => `within ±${Math.round(s.within * 100
 
 // Counted over every note in the report, missed ones included: the match
 // window is wider than the criterion, so "within" is not already a given.
-// Untimed notes (Follow's restarts) are neither within, early nor late.
+// Untimed notes (Follow's first chord) are neither within, early nor late.
 export function counts(a: Alignment, s: ReviewSettings, c: Context) {
   let within = 0, early = 0, late = 0, missed = 0, untimed = 0;
   for (const n of a.notes) {
@@ -257,16 +257,18 @@ export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
         const p = pauses(a);
         parts.push(`${p} pause${p === 1 ? '' : 's'}`, `${extras} wrong key${extras === 1 ? '' : 's'}`);
       } else parts.push(`${k.missed} missed${wrong ? ` (${wrong} wrong key)` : ''}`, `${extras} extra`);
+      // Follow: no median, the counts say it.
       const timed = played.filter((n) => n.deltaMs !== undefined);
-      if (!timed.length) return [...parts, ...offsetPart(s, c)].join(' · ');
-      const fmt = (ns: PlayedNote[]) => {
-        const t = ns.map((n) => timing(n, c));
-        return `${signed(quantile(t.map((x) => x.pct), 0.5))} % (${signed(quantile(t.map((x) => x.ms), 0.5))} ms)`;
-      };
-      const rh = timed.filter((n) => n.expected.staff === 1);
-      const lh = timed.filter((n) => n.expected.staff === 2);
-      parts.push(`median ${fmt(timed)}`);
-      if (rh.length && lh.length) parts.push(`RH ${fmt(rh)}`, `LH ${fmt(lh)}`);
+      if (timed.length && !c.follow) {
+        const fmt = (ns: PlayedNote[]) => {
+          const t = ns.map((n) => timing(n, c));
+          return `${signed(quantile(t.map((x) => x.pct), 0.5))} % (${signed(quantile(t.map((x) => x.ms), 0.5))} ms)`;
+        };
+        const rh = timed.filter((n) => n.expected.staff === 1);
+        const lh = timed.filter((n) => n.expected.staff === 2);
+        parts.push(`median ${fmt(timed)}`);
+        if (rh.length && lh.length) parts.push(`RH ${fmt(rh)}`, `LH ${fmt(lh)}`);
+      }
       if (c.bpm) parts.push(`at ${Math.round(c.bpm)} bpm`);
       if (c.beatMs) parts.push(`1 beat = ${Math.round(c.beatMs)} ms`);
       return [...parts, ...offsetPart(s, c)].join(' · ');
@@ -304,9 +306,8 @@ export function describe(n: PlayedNote, s: ReviewSettings, c: Context): string {
   }
   const parts = [
     name,
-    n.restart === 'first' ? 'clock started here'
-      : n.restart === 'pause' ? 'clock restarted here (pause)'
-      : ((t) => `${signed(t.ms)} ms (${signed(t.pct)} % of beat)`)(timing(n, c)),
+    n.restart === 'first' ? 'clock started here' : ((t) => `${signed(t.ms)} ms (${signed(t.pct)} % of beat)`)(timing(n, c)),
+    ...(n.restart === 'pause' ? ['clock restarted here (pause)'] : []),
     n.heldMs === undefined ? 'still held' : `held ${n.heldMs.toFixed(0)} ms (${n.durationPct?.toFixed(0) ?? '—'} %)`,
     `vel ${n.velocityPct!.toFixed(0)} %`,
   ];
