@@ -1,261 +1,163 @@
 # Plan: Follow mode
 
+Handoff, 2026-10-25. Follow mode is implemented and on `main`. After testing it on the piano, the user set one principle, and some of what was built breaks it. **The next session starts with "To do next" below.**
+
+## What Follow is
+
 A third practice mode between Wait and Tempo: **Wait · Follow · Tempo**.
 
 While playing, Follow behaves exactly like Wait. The score waits for each chord, all of it held down at once. A wrong key flashes red and does not advance. Played notes turn green. There is no metronome and no count-in.
 
-Nothing is timed while playing: the keys are only recorded. When the run ends, the analysis lays a clock at the set bpm over the recording, and the score shows the same review as Tempo: the Notes/Timing, Duration, Velocity and Pedal layers, the tap popover and Save run. All timing is judged against that clock:
+Nothing is timed while playing: the keys are only recorded. When the run ends, the analysis lays a clock at the run's bpm over the recording, and the score shows the same review as Tempo: the Notes/Timing, Duration, Velocity and Pedal layers, the tap popover and Save run.
 
-- **Drift is not forgiven** within a stretch of playing: the clock is never nudged towards the player.
-- **Stops are forgiven.** A chord more than the match window late counts as a pause. Its notes get no timing and the clock restarts from that chord.
+## The principle (decided 2026-10-25)
 
-Because the clock exists only after the run, −/+ bpm during a review re-times it: the same recording, judged at the new tempo.
+**One tempo, agreed before playing. No retrofitting.**
 
-Wait and Tempo stay unchanged, except for the small instrumentation of `WaitMode` described in step 1.
+> "There should be only one tempo which I agree beforehand, no retrofitting. It doesn't make sense to say: I wanted to play it at 50 bpm but I ended up playing it faster and it's good. Even if I don't play with a metronome, there should be one tempo I follow."
+
+So the review never adapts the clock to how the run was played: not its tempo, and not its starting point within a stretch. The only things that move the clock are the first chord and stops.
+
+**A stop is late by definition.** The chord after a stop is timed against the clock that was running, so it reads late. Then the clock restarts from it.
 
 ## Rules (decided)
 
 | Thing | Rule |
 |---|---|
-| Tempo | The set practice bpm (`speed`, the same −/+ control and per-score memory as Tempo). Not inferred from playing. During a Follow review, −/+ re-runs the analysis at the new bpm, and Save run records the bpm in use. |
-| Fewest errors | Added after the first runs. The review also times the run at every bpm −/+ can reach (and at its own), and names the one with the most notes within the selected criterion: `fewest errors at 50 bpm (186 / 366)`. Ties go to the nearest to the run's bpm. Tapping it re-times the review there and sets the bpm; the review still opens at the bpm you set. No played-tempo estimate: sections can't be defined easily and consistently. |
+| Tempo | The practice bpm set with −/+ (`speed`, per-score memory, shared with Tempo), **taken when the run starts** (its first key) and fixed for that run. The review is timed at that bpm only. −/+ during a review sets the bpm for the next run, as in Tempo; it does not re-time the review. |
 | Clock | `expected(chord) = anchor.realMs + (chord.onMs − anchor.onMs) / speed`. `onMs` already contains the score's written tempo changes. |
-| Anchor | The first chord played. Afterwards, every chord that counts as a pause. Nothing else ever moves the anchor. |
-| Bar-based start | Added 2026-10-25. Each stretch (from an anchor to the next pause) starts its clock on the anchor. At the first chord one bar (the meter's, at the anchor) after it, the clock is moved once by the median offset of the chords so far: the anchor and the chords in its bar, each chord counted by the median of its keys. The tempo stays the set one, so drift still builds up after that bar. Pauses in the first bar are decided on the unmoved clock, later ones on the moved clock. |
-| Chord onset | The earliest on-time among the presses that completed the chord (see "counted press" below). Used for the pause decision and as the anchor's time. |
-| Pause | `chordOnset − expected > window × chord.beatMs / speed`. Here `window` is the review's match window for the chosen criterion (`windowOf(review.settings)`): 0.5 beat at 20 %, 0.3 at 10 %. Kept for v1; see "Open questions for testing". |
-| Pause chord | Becomes the new anchor. With the bar-based start it is timed against the bar after it; in a stretch that ends within its first bar it stays untimed: no `deltaMs`, grey on the Notes layer. The first chord of a run is treated the same way. Either way it keeps `restart` and counts as a pause. |
-| Per-note timing | Each note is timed individually: `deltaMs = noteOnset − expected(chord)`. This makes the spread between the hands visible note by note, as in Tempo. Early notes are never a pause. Rushing beyond the window just clamps at full "early" colour. |
-| On time | The review criterion, unchanged (`within`, 20 % for Joe). |
+| Anchor | The first chord played. Afterwards, every pause chord. Nothing else ever moves the clock. |
+| Chord onset | The earliest key among the presses that completed the chord (the "counted press": a re-struck key counts with the press still down when the chord completed). Used for the pause decision and as the anchor's time. |
+| Pause | `chordOnset − expected > window × chord.beatMs / speed`. `window` is the review's match window for the chosen criterion (`windowOf(review.settings)`): 0.5 beat at ±20 %, 0.3 at ±10 %. |
+| First chord | Untimed: `played`, no `deltaMs`, grey on the Notes layer, `restart: 'first'`. There is no clock before it. |
+| Pause chord | Timed against the old clock, so always late beyond the window (full late colour, ▸). `restart: 'pause'`. Counts in "late" and in "N pauses". The clock then restarts from its onset. |
+| Per-note timing | Each note is timed on its own: `deltaMs = noteOnset − expected(chord)`, so the spread between the hands shows. Early notes are never a pause. Beyond the window, early or late, the colour clamps at full. |
+| On time | The review criterion (`within`): ±10 % or ±20 % of a beat. |
+| Notes summary | `W / T within ±20 % · E early · L late · P pauses · X wrong keys · at 50 bpm · 1 beat = 1200 ms`. No median: not informative here. "at N bpm" is the run's bpm, in Follow and Tempo. |
 | Velocity | Always measured. |
-| Duration | `heldMs` comes from real times. `durationPct = heldMs / ((offMs − onMs) / speed)`. It is `undefined` when a pause anchor's onset falls strictly between the key's on and off, because a note held through a stop has a meaningless length. |
-| End of the run | When the last chord completes, recording goes on until every key is up, then the review shows. So the last chord's durations are measured. Stop (or Space) ends at once. |
-| Missed notes | Do not exist in Follow: a chord must be played to advance. Notes of chords not completed when the run stops are left out of the report (as `untilMs` does in Tempo). |
-| Wrong keys | Become `extras`. Each is placed at the clock time of the chord that was current when it was pressed. `wrongFor` stays undefined. Wrong keys before the first counted press of the first chord are dropped: the run hadn't started. |
-| Pedal | Timed against the same clock. A pedal pressed during a pause (while the clock is clamped, see step 2) is untimed. A pedal held through a pause keeps its real `heldMs` but gets no `durationPct`, as a key. |
-| Latency | Not applied (`latencyMs: 0`). All timing is relative to played anchors, so device latency cancels out. Keys and pedal share the same latency. |
-| Re-center | Off and hidden in Follow. It subtracts one median offset for the whole run, but each stretch between pauses has its own anchor, so one run-wide offset doesn't fit them. |
-| Live feedback | Wait-style only: every played note goes green. No timing colours while playing. |
+| Duration | `heldMs` from real times. `durationPct = heldMs / ((offMs − onMs) / speed)`. Undefined when a pause chord's onset falls strictly between the key's on and off. |
+| End of the run | When the last chord completes, recording goes on until every key is up, then the review shows. Stop (or Space) ends at once. |
+| Missed notes | Don't exist in Follow. Chords not completed when the run stops are left out of the report. |
+| Wrong keys | `extras`, placed at the score time of the chord being asked for. Wrong keys before the first chord's first key are dropped. |
+| Pedal | Timed against the same clock. A pedal pressed during a stop is untimed (`restart: 'pause'`). A pedal held through a stop keeps its real `heldMs` but gets no `durationPct`. |
+| Latency | Not applied (`latencyMs: 0`): timing is relative to played anchors, so device latency cancels out. |
+| Re-center | Off and hidden in Follow: each stretch between pauses has its own anchor, so one run-wide offset doesn't fit. |
+| Live feedback | Wait-style only: played notes go green. No timing colours while playing. |
 
-Changing the review criterion (10 % ↔ 20 %) changes the window, and therefore which chords count as pauses. Changing the bpm changes every expected time. So the analysis must be a **pure function re-run on every `realign` and every −/+**, as `analyse()` already does for Tempo.
+The analysis is a pure function re-run on every criterion change (the window decides the pauses).
 
-## Step 1: instrument `WaitMode` (`src/engine/waitMode.ts`)
+## Where the code stands (main, 2026-10-25)
 
-Keep the behaviour identical. All existing tests must pass untouched.
+| Commit | What |
+|---|---|
+| `65beca0` | The first version of this plan. |
+| `eff5b66` | Follow mode: replay through `WaitMode`, `analyseFollow`, review wording, wiring. **Keep**, except `retime()` (−/+ re-timing a review, step 2) and grey pause chords (step 3). |
+| `41a3b60` | "Fewest errors at N bpm" button; tapping it re-times the review there. **Remove** (step 1). |
+| `7e9985b` | Plan notes only. |
+| `7e7ab12` | Bar-based start: each stretch's clock moved once to the median of its first bar. **Remove** (step 1). |
 
-- `held` changes from `Set<number>` to `Map<number, { t: number; velocity: number }>`, mapping pitch → the press that is currently down.
-  - Re-striking a chord note replaces the entry. The **counted press** is the one still down at completion.
-  - An `off` event deletes the entry, as now.
-- Add `readonly completions: Completion[]`, where
-  `type Completion = { chord: number; presses: Map<number, { t: number; velocity: number }> }`.
-  Push one entry in `handle()` when a chord completes, before `enter(cursor + 1)`. Storing `held` itself is safe: `enter()` replaces it with a new map.
-- Add `readonly wrongs: { pitch: number; t: number; velocity: number; chord: number }[]`, pushed where `wrong++` happens.
-- `restart()` clears both arrays.
-- Update `expected` and any other code that reads `held`.
+`41a3b60` and `7e7ab12` are the only commits after `eff5b66` that touch `src/`, `test/` or `README.md` (`git log eff5b66..HEAD -- src test README.md`).
 
-## Step 2: pure analysis (`src/engine/follow.ts`, new)
+Where Follow lives, as of `eff5b66`:
+- `src/engine/waitMode.ts`: `completions` (the counted press of each completed chord) and `wrongs`.
+- `src/engine/follow.ts`: `analyseFollow`: replay, clock walk, notes, extras, pedal.
+- `src/engine/align.ts`: `alignPedal` exported, generic over press objects, returns `pressOf`.
+- `src/types.ts`: `restart` on `PlayedNote` and `PlayedPedal`.
+- `src/review/layers.ts`: `Context.follow`, untimed notes grey, `counts().untimed`, `pauses()`, the Follow summary and popover wording.
+- `src/review/view.ts`: `show(…, follow)`, Re-center hidden, the Follow key legend.
+- `src/main.ts`: `followRun`, `recordFollow`, `finishFollow`, the Follow branch of `analyse()`, `retime()`.
 
-No DOM, no clock: tested in Node like `align.ts`.
+## To do next
 
-```ts
-export type FollowOptions = {
-  hands: Hands;
-  window: { startMs: number; endMs: number };   // the section; only the pedal needs it
-  pauseBeats: number;                            // = review match window
-};
+`npm test` and `npm run build` must pass after each step. One commit per step.
 
-export function analyseFollow(
-  events: ExpectedEvent[],      // practiceEvents(timing): the section's notes
-  recording: NoteEvent[],       // raw, t = real ms from the run's first event
-  speed: number,
-  opts: FollowOptions,
-  pedalMarks: PedalMark[],
-): Alignment
-```
+**Step 1: back to `eff5b66`'s code.** Check that the log above still holds, then `git checkout eff5b66 -- src test README.md`. This removes the bar-based start and "fewest errors", with their tests and README sentences.
 
-**1. Replay.** Feed the recording, **in recorded order** (not re-sorted: `__play` sends an on and an off with the same `t`), through a fresh `new WaitMode(events, opts.hands)`. Read `completions` and `wrongs` from it. Replaying makes Save run / `__replay` work with the recording alone, so nothing else needs storing.
+**Step 2: one bpm per run.**
+- `main.ts`: remove `retime()` and its calls in the −/+ handlers.
+- Add `speed` to `followRun` when `recordFollow` creates it, and use it in `finishFollow`. Today `finishFollow` reads the current `speed`, so −/+ pressed during a run would change it. Tempo already works this way: `TempoRun` takes `speed` in its constructor.
+- `layers.ts`: add `at N bpm` before `1 beat = …` in the Notes summary, in Follow and Tempo, from the run's `speed`. `Context` needs the bpm.
+- README: remove "−/+ during the review times the same playing at another bpm"; mention "at N bpm".
+- Tests: update the summary assertions in `test/layers.test.ts`. The bpm test in `test/follow.test.ts` ("the practice speed sets the clock") stays: `analyseFollow` is still a function of `speed`.
 
-**2. Anchors.** Walk the completions in order.
-- Chord onset = the min `t` of its presses.
-- The first completion is an anchor.
-- Every other completion is checked against `expected` from the current anchor. If it is later than `pauseBeats × beatMs / speed`, it becomes a new anchor and is marked untimed.
+**Step 3: pause chords timed late; no median in Follow.**
+- `follow.ts`, the clock walk: on a pause, `expectedAt.set(c.chord, at)` (the old clock) before pushing the new anchor. Only the first chord stays untimed.
+- `layers.ts`:
+  - `describe()`: a pause chord shows its timing and then "clock restarted here (pause)".
+  - `summary()` in Follow: drop `median …` and the RH/LH medians. Tempo keeps them.
+  - `counts().untimed` is now only the first chord.
+- Tests:
+  - `test/follow.test.ts`: in "a stop", "drift is not forgiven" and "the match window decides", the pause chord now has a late `deltaPct` (drift: 15, 30, 45, 60, then 15).
+  - `test/layers.test.ts`, the Follow test: n2 is no longer grey, counts are `within 2, late 1, untimed 1`, and the summary has no median.
+- README: "a pause is grey, untimed" becomes "the chord after a stop is late, and the clock restarts there".
 
-**3. Clock map** `clock(realMs) → ms on the score axis at this speed` (score ms / speed). It is used for the notes' `onsetMs` and to place pedal events.
-- Within the anchor segment that starts at real time `A.r` with clock time `A.c = chord.onMs / speed`: `clock = A.c + (real − A.r)`.
-- Before the first anchor, the same line extended backwards: a pedal pressed before the first chord reads as early.
-- Clamp to the next anchor's `c`. Events during a pause then land at the restart chord instead of overshooting and jumping back, and the mapping stays monotonic. Remember which events were clamped: they happened during a stop.
+**Step 4: replay script, and check.**
+- Write `scripts/replay-follow.mjs` and commit it. It takes a saved run's JSON and the score's MusicXML, and prints a row of the Reference data table at ±20 % and ±10 %. `playwright-core` stays out of `package.json`: the script's header says how to install it in a scratch directory and how to start the dev server. See "How these were computed".
+- Replay the 17:57 run at ±20 %. It should give 249 within and 92 pauses as before. Late goes from 175 to 175 + 234 − the first chord's notes, and untimed drops to the first chord's notes.
+- Update this plan: replace "Where the code stands" and "To do next" with what was done, and add the new row to Reference data.
 
-**4. Notes.** For every expected event in the completed chords (`WaitMode` already left out the other hand, and `events` are the section's):
-- `onsetMs = clock(press.t)`
-- `deltaMs`: undefined for anchor chords, otherwise `press.t − expected(chord)`
-- `deltaPct = deltaMs / (beatMs / speed) × 100`
-- `velocity`, `velocityPct`
-- `heldMs` and `pedal` from `keyPresses(recording)` (already exported from `align.ts`), matched on `pitch` and `on === press.t`
-- `durationPct` per the rule above
-- `status: 'played'`
-- `restart: 'first'` on the first chord, `restart: 'pause'` on pause chords
+## Open decisions
 
-A unison (both hands on one pitch) gives both events the same press.
+- **The first chord sets the clock.** Decided: the first chord (not a count-in) starts the clock. Known cost: if the first chord is off the player's pulse, every note until the next pause shifts with it. Seen in the 17:57 run: bar 2 came 25 % early after the pickup, so bars 2–9 read 25 % more early than they were. Revisit only if it keeps bothering in practice.
+- **Pedal pressed during a stop.** Still untimed. By "a stop is late by definition" it could be timed late against the old clock too, like the pause chord.
+- **A hand found late in a chord.** The LH is on time, then the RH is found 2 beats later with the LH held. The chord is not a pause (onset = the LH), the RH reads very late, and the next chord becomes the pause instead.
+- **Fast passages crossing hands.** Wait asks for chords in strict order. If one hand's next note comes before the other hand's current one, it is a wrong key and must be struck again. Probably rare; check on a fast piece.
 
-**5. Extras.** `wrongs`, minus those before the first chord's onset → `{ pitch, onsetMs: chords[w.chord].onMs / speed, velocity, velocityPct }`. This is the clock time of the chord that was being asked for.
+## Decided against (and why)
 
-**6. Pedal.** Export `alignPedal` from `align.ts`. Feed it the pedal events of the recording with `t` mapped through `clock()`.
-- Set `untilMs` to the clock time of the last completed chord.
-- Set `from`/`to` as `align` computes them from the window, with `biasMs` = 0.
-- Afterwards, on each `PlayedPedal`:
-  - A down that was clamped → `deltaMs` undefined, `restart: 'pause'`.
-  - An anchor's onset strictly inside its span → `heldMs` from the real times, `durationPct` undefined.
-  - Pedal extras keep their clock-mapped `atMs`.
+- **Bar-based start** (built in `7e7ab12`, removed in step 1). Hard to follow, and it fits the clock to the playing.
+- **"Fewest errors at N bpm"** (built in `41a3b60`, removed in step 1). It names a tempo after the fact: retrofitting.
+- **−/+ re-timing a finished run** (built in `eff5b66`, removed in step 2). Same reason.
+- **Grey, untimed pause chords** (built in `eff5b66`, changed in step 3). A stop is late by definition. Grey also hid the worst chord of a drag, and made a chord just past the window look better than one just inside it.
+- **Timing only the pause chords under 1 beat late.** Superseded by timing every pause chord.
+- **A median in the Follow summary.** Not informative. The median that matters in Tempo is the run's offset for re-center, and Follow has no re-center.
+- **A count-in** (one bar of clicks at the set bpm, then silence, so the first chord is timed too). Offered on 2026-10-25; the user chose the first chord instead. It would need a Start button and the calibrated latency.
+- **A fixed pause threshold** (1 or 2 beats) instead of the match window. Tested on both saved runs (table below): a hesitation that is no longer a pause leaves the clock behind, so every note after it reads late until the next pause.
+- **A played-tempo estimate** ("played 51 → 44 bpm"). Sections can't be defined easily and consistently.
+- **Re-center in Follow.** One run-wide offset doesn't fit stretches with their own anchors.
 
-## Step 3: types (`src/types.ts`)
+## Reference data
 
-- `PlayedNote`: add `restart?: 'first' | 'pause'`, documented as "Follow: the clock started on this chord (first) or restarted after a stop (pause); untimed".
-- `PlayedPedal`: add `restart?: 'pause'`, "Follow: pressed during a stop; untimed".
-- `deltaMs` is already optional. The review just has to cope with it being undefined on a played note.
-- The number of pauses is not stored: it is the number of distinct chords (`onMs`) with `restart === 'pause'`.
+Saved runs (gitignored, `runs/`), both "Waltz in A minor" at 50 bpm (score 65 bpm, `speed` 0.769), hands both, whole piece:
+- `runs/Waltz in A minor 2026-10-25T1718.json`: stopped at bar 33, 158 chords.
+- `runs/Waltz in A minor 2026-10-25T1757.json`: complete, 878 notes.
 
-## Step 4: review copes with untimed notes (`src/review/layers.ts`, `view.ts`)
+The score is in the user's device library, not in `public/scores`. Its MuseScore export is `~/Documents/MuseScore4/Scores/export/Waltz in A minor.musicxml`.
 
-- `Context` gets `follow: boolean`, set from `show()`.
-- `position()` for `'notes'`: return `undefined` when `deltaMs` is undefined. This makes the note grey (`NOT_MEASURED`).
-- `outside()`: return `undefined` when untimed.
-- `counts()`: count untimed played notes as neither within, early nor late. Add `untimed` to the result. `total` stays all notes in the report.
-- `summary()` for `'notes'`:
-  - Medians only over timed notes.
-  - In Follow: `W / T within ±10 % · E early · L late · P pauses · X wrong keys · median … · 1 beat = N ms`. No `missed`, no `extra`.
-- `summary()` for `'pedal'`: `down` counts pedals with `atMs`, not `deltaMs`, so an untimed one still counts as down. The within count and median stay over timed ones.
-- `describe()`: for an untimed note show `clock started here` (`first`) or `clock restarted here (pause)` instead of the ms/% part. Keep held and velocity.
-- `describePedal()`: `pedal down (Ped.) · during a pause` for an untimed down, not `missed`.
-- `runOffset()` already skips undefined `deltaMs` (checked).
-- `ReviewView.show(alignment, speed, offset, follow = false)`:
-  - In Follow, hide the Re-center button and force `biasMs` 0 in `context()`.
-  - `offsetPart()` prints nothing in Follow (it would otherwise say "re-center needs ≥ 50 timed notes" when the saved setting is on).
-- `renderStrip()` key legend for the Notes layer in Follow: `◂ ▸ outside ±10 %`, grey `clock restarted`, `× wrong key`.
+Pause rule compared on the complete run, at 50 bpm, with the first-chord clock and grey pause chords (`eff5b66`):
 
-## Step 5: wiring (`src/main.ts`)
+| pause rule | ±20 %: within | late | untimed | pauses | beyond the colour range | ±10 %: within | pauses |
+|---|---|---|---|---|---|---|---|
+| match window (kept) | 249 | 175 | 234 | 92 | 123 | 183 | 110 |
+| 1 beat | 224 | 278 | 180 | 64 | 249 | 129 | 64 |
+| 2 beats | 109 | 480 | 110 | 43 | 511 | 52 | 43 |
 
-**Mode**
-- `type Mode = 'wait' | 'follow' | 'tempo'`. Add `<button data-mode="follow" role="radio">Follow</button>` between Wait and Tempo. Add `'follow'` to `oneOf`.
-- Rename the scroll function `follow()` to `scrollToCurrent()`: "follow" now names the mode.
+70 of the 92 pauses are in bars 40 and later: the second half was stop-and-start at any threshold.
 
-**`setMode`**
-- In Follow show `#restart`, `#waitFeedback` and `#tempoControls`.
-- Inside `#tempoControls`, hide `#click`, `#subdivide` and `#latency` in Follow and keep the speed −/+.
-- `#startStop` in Follow: shown only while a run is in progress, labelled **Stop**. Hidden otherwise. Restart is the one way to go again, before or after a review.
-
-**State**
-- Reuse `practice: WaitMode` for live play.
-- Add `let followRun: { t0: number; recording: NoteEvent[]; down: Set<number> } | undefined`.
-- `t0` = the `t` of the first key or pedal down after `restart()`. `down` tracks the keys currently held, to know when the last chord is let go.
-
-**`onNote`**
-- In Follow, while a review is shown: ignore everything until Restart. After a Stop mid-way, `practice` is not done and would otherwise keep advancing.
-- A run cut short without a review (Bars, Library, or Stop before any chord): the next key restarts from the top.
-- Otherwise: `followRun.recording.push({ ...ev, t: ev.t - t0 })` for every event, including pedal and wrong keys, and update `down`.
-- Then the existing wait handling (`practice.handle`, `flashWrong`, `paint`, `scrollToCurrent()`).
-- Once `practice.done` and `down` is empty, call `finishFollow()`.
-
-**`finishFollow()`** (also bound to Stop, and to Space in Follow)
-- If at least one chord completed: set `lastRun = { mode: 'follow', recording, speed, latencyMs: 0, recordedAt, untilMs: Infinity, window: playWindow(timing, section) }`, call `analyse()`, then `scrollToStart()`.
-- Add `mode` to `LastRun` so `downloadRun` writes it and `__replay` can dispatch on it.
-
-**`analyse()`**
-- If `lastRun.mode === 'follow'`:
-  ```ts
-  analyseFollow(practiceEvents(timing), recording, lastRun.speed,
-    { hands, window, pauseBeats: review.window }, timing.pedals)
-  ```
-  then `review.show(result, lastRun.speed, { ms: undefined, notes: 0 }, true)`, and `lastOffset = undefined`.
-- Otherwise keep the Tempo path as it is.
-
-**−/+ bpm**
-- After `setBpm()`, if `mode === 'follow'` and a Follow review is shown: `lastRun = { ...lastRun, speed }` and `analyse()`. Tempo reviews keep the bpm they were played at.
-
-**`paint()`**
-- Use wait note states when `mode === 'wait' || (mode === 'follow' && !review.active)`.
-- During a Follow review, review colours replace the greens, as in Tempo.
-- The progress line is the same as Wait's for Follow while playing.
-
-**`setHands`**
-- In Follow, always `restart()`. The hand choice decided what was asked, so a review can't be re-cut by hand.
-
-**`restart()`**
-- Also clears `followRun` and hides `#startStop`. The first event after it starts a new run and shows Stop.
-
-**`keepAwake`**
-- Also keep the screen on while a Follow run is in progress.
-
-**`__replay(recording, speed, untilMs, mode = 'tempo')`**
-- Dispatch on `mode`, so a saved Follow run can be replayed.
-
-## Step 6: tests (`test/follow.test.ts`, new; extend `test/waitMode.test.ts`)
-
-Use the helpers from `waitMode.test.ts`, with `beatMs: 500`, `speed: 1`, `pauseBeats: 0.5`. Build recordings with explicit `t`. Keep test values off the exact pause boundary.
-
-1. **WaitMode completions**: a chord completed with a re-strike records the later press. Existing tests still pass.
-2. **Steady**: on-time chords → first chord `restart: 'first'`, the rest `deltaMs ≈ 0`, no pauses.
-3. **Late within window**: one chord 30 % late → `deltaPct ≈ 30`, clock not moved. The next chord, played on the original grid, has `delta ≈ 0`.
-4. **Pause**: 3 beats of silence before chord k → chord k `restart: 'pause'`. The following chords are timed from k's onset.
-5. **Criterion changes classification**: a chord 40 % late is timed with `pauseBeats 0.5` and a pause with `0.3`.
-6. **Drift is not forgiven**: every chord 15 % of a beat slower than the last. Deltas 15, 30, 45 %, then the 5th chord (60 %) is a pause and the 6th is back to 15 %.
-7. **Early**: a chord 70 % early is timed (negative), never a pause.
-8. **Per-note timing in a chord**: LH 40 ms before RH → chord onset = the LH time. Each note has its own `deltaMs`.
-9. **Duration**: normal hold → `durationPct` from real ms. A key held through a pause → `durationPct` undefined. Key-ups after the last completion are used (the last chord's durations).
-10. **Hands**: `hands: 'left'` reports only staff 2.
-11. **Wrong key**: becomes an extra at the current chord's `onMs / speed`. A wrong key before the first chord is dropped.
-12. **Stopped early**: only completed chords are reported.
-13. **Pedal**: Ped. on time → `deltaMs ≈ 0` via the clock map. A pedal down during a pause → untimed, `restart: 'pause'`. A pedal held through a pause → real `heldMs`, `durationPct` undefined. A pedal before the first chord reads as early.
-14. **Unison**: both hands on one pitch → both events get the same press.
-15. **Re-struck key**: timed from the press that completed the chord.
-16. **A hand found late**: not a pause, the late hand reads late (see open questions).
-17. **Bpm**: the same recording at a slower `speed` gives later expected times and different pauses.
-
-Run `npm test` and `npm run build` (tsc must pass).
-
-## Step 7: README
-
-Add a **Follow mode** paragraph between Wait and Tempo, covering:
-- Plays like Wait.
-- Clock at the set bpm, no metronome. −/+ during the review re-times the run.
-- On time = the review criterion.
-- A chord later than the match window (50 % at 20 %, 30 % at 10 %) is a pause: grey, and the clock restarts there.
-- Drift is not forgiven, and no re-center.
-- Latency calibration is not needed.
-- The run ends when the last chord is let go.
-- Same review as Tempo at the end, with N pauses in the summary.
+How these were computed (the scripts lived in a session scratchpad and are gone; step 4 puts them in `scripts/`):
+- Start the dev server (`npx vite --port 5199 --strictPort`).
+- Drive headless Chromium (`/usr/bin/chromium`) with `playwright-core`, installed in a scratch directory, not in the project.
+- In the page, `await import('/src/engine/follow.ts')` and `await import('/src/score/load.ts')`. `loadScore({ kind: 'xml', text }, title)` gives the `ScoreTiming` for the exported MusicXML.
+- Call `analyseFollow(timing.events, run.recording, run.speed, { hands: 'both', window: run.window, pauseBeats }, timing.pedals)`.
+- Note: Save run writes `untilMs: Infinity` as `null` in the JSON.
 
 ## Manual test checklist (tablet / laptop + piano)
 
 - [ ] Follow plays exactly like Wait: chord-at-once rule, red flash, greens, progress line, scrolling.
-- [ ] Steady playing at the set bpm → mostly green in the Notes layer, 0 pauses.
-- [ ] A deliberate stop to change position → that chord is grey, timing afterwards is sensible, 1 pause.
-- [ ] Slowly dragging → amber/brown growing, then a pause.
+- [ ] Steady playing at the set bpm → mostly green in the Notes layer, 0 pauses. The first chord is grey.
+- [ ] A deliberate stop to change position → that chord is full late with ▸, timing afterwards is sensible, 1 pause.
+- [ ] Slowly dragging → amber/brown growing, then a pause at full late, then back to small.
 - [ ] 10 % ↔ 20 % in the review recomputes the pauses.
-- [ ] −/+ during the review re-times it. Save run then records the new bpm.
+- [ ] −/+ during a review changes the top bpm only; the review, and its "at N bpm", stay as they were. The next run uses the new bpm.
+- [ ] −/+ during a run doesn't change that run's review.
 - [ ] The review appears when the last chord is let go. Its Duration is measured.
 - [ ] Duration, Velocity and Pedal layers populated. A note held through a stop is grey on Duration. A pedal pressed during a stop is grey.
 - [ ] Bars section and Left/Right work. Stop mid-way shows a partial review, and keys after it do nothing until Restart.
-- [ ] Save run → JSON has `mode: "follow"`. `__replay(json.recording, json.speed, Infinity, 'follow')` reproduces the review.
-- [ ] Wait and Tempo unchanged.
-
-## Open questions for testing
-
-Kept as planned for v1. Revisit with real runs.
-
-- **Pause threshold = match window.** Objections raised in review:
-  - Not monotonic: at ±10 %, a chord 25 % late gets ▸, one 35 % late is a pause and reads grey (neutral). The worse note looks better.
-  - Changing the criterion moves the anchors, so the ms of every later note change. A display criterion changes the measurements.
-  - Drift is forgiven in steps: dragging at ±10 % resets the clock about every 4 chords. The pause count is then the only sign of it.
-  - Alternative: a fixed threshold (1 or 2 beats). Between the window and the threshold, a note clamps at full late colour with ▸, as early notes already do. The criterion then no longer changes the pauses.
-  - Tested on the two Waltz in A minor runs of 2026-10-25 (50 bpm). A fixed threshold makes things worse: a hesitation that is no longer a pause leaves the clock behind, so every note after it reads late until the next pause. Complete run, ±20 %: window 249 within / 92 pauses; 1 beat 224 / 64; 2 beats 109 / 43. Notes beyond the colour range: 123 → 249 → 511. Kept the window.
-  - Idea, untested: keep the window rule, but time the restart chord itself when it is less than 1 beat late (full late colour + ▸, the clock still restarts). Grey only for real stops of 1 beat or more. That fixes "later looks better" without the knock-on.
-- **One-chord anchors.** Each stretch is timed from one chord. If that chord is 30 ms off the player's own pulse, every note after it shifts by 30 ms (6 % at 120 bpm). Seen in the Waltz in A minor run of 2026-10-25 17:57: bar 2 came 25 % early after the pickup, and that −25 % carried into every later note (on top of real rushing, about 52 bpm for 50).
-  - Done 2026-10-25 (see "Bar-based start" in the rules): a bar-based start. After a stretch's first bar, move the clock once by the median offset of its chords (each chord = the median of its notes; the earliest note stays for the pause decision). The tempo stays fixed, so drift still builds up. The starting chord then gets a timing too. Only for stretches that go on past their first bar; shorter ones keep the grey start. On that run: shift −26 %, the pickup +26 %, bars 2–3 within ±20 %, bars 4–9 still early, bar 10 +41 %. Whole run at ±20 %: within 249 → 336, beyond the colour range 123 → 54, pauses unchanged (92). Watch: a stretch just over a bar long is mostly judged against its own bar.
-- **A hand found late in an anchor chord.** The LH is on time, then the RH is found 2 beats later, with the LH held. The chord is not a pause (onset = the LH). The RH reads very late, and the next chord becomes a pause instead.
-- **Fast passages crossing hands.** Wait asks for chords in strict order. If one hand's next note comes before the other hand's current one (hand spread longer than the note value), it is a wrong key and must be struck again. Probably rare. Check on a fast piece.
+- [ ] Save run → JSON has `mode: "follow"` and the run's bpm. `__replay(json.recording, json.speed, Infinity, 'follow')` reproduces the review.
+- [ ] Wait and Tempo unchanged, except "at N bpm" in Tempo's summary.
 
 ## Out of scope / later
 
-- **Ritardando, accelerando and fermatas.** Tempo changes written as metronome marks are already in `onMs` and are followed automatically. An unmarked *rit.* will show as growing lateness and then a pause. A later option could be per-bar tempo hints, or tempo text from the score.
+- **Ritardando, accelerando and fermatas.** Tempo changes written as metronome marks are already in `onMs` and are followed automatically. An unmarked *rit.* shows as growing lateness and then a pause.
 - Live timing colours (decided: not now).
 - Several wrong keys on one chord: their × markers sit on one spot. Merge them into one marker listing the pitches, if it bothers.
