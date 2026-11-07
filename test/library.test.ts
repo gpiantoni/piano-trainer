@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { baseName, meiMeta, musicXmlMeta, scoreKind } from '../src/score/meta.ts';
+import { baseName, bookPlace, meiMeta, musicXmlMeta, naturalCompare, scoreKind } from '../src/score/meta.ts';
 import { ago, diffFolder, type FoundFile, type StoredFile } from '../src/library/scan.ts';
 
 test('musicXmlMeta: work title, composer, entities', () => {
@@ -29,6 +29,24 @@ test('scoreKind and baseName', () => {
   assert.equal(scoreKind('Waltz.pdf'), undefined);
   assert.equal(scoreKind('Waltz.mscz'), undefined);
   assert.equal(baseName('export/Etude C-dur.musicxml'), 'Etude C-dur');
+});
+
+test('bookPlace: the subfolder is the book, the leading number the page', () => {
+  assert.deepEqual(bookPlace('Waltz.musicxml'), { book: '', page: '' });
+  assert.deepEqual(bookPlace('1812 Overture.musicxml'), { book: '', page: '' });
+  assert.deepEqual(bookPlace('Alfred 1/12 Ode to Joy.musicxml'), { book: 'Alfred 1', page: '12' });
+  assert.deepEqual(bookPlace('Alfred 1/p012 Ode to Joy.mxl'), { book: 'Alfred 1', page: '12' });
+  assert.deepEqual(bookPlace('Alfred 1/12a - Aura Lee.musicxml'), { book: 'Alfred 1', page: '12a' });
+  assert.deepEqual(bookPlace('Alfred 1/7.musicxml'), { book: 'Alfred 1', page: '7' });
+  assert.deepEqual(bookPlace('Alfred 1/Ode to Joy.musicxml'), { book: 'Alfred 1', page: '' });
+  assert.deepEqual(bookPlace('Alfred 1/Plaisir d’amour.musicxml'), { book: 'Alfred 1', page: '' });
+  assert.deepEqual(bookPlace('Alfred 1/Extras/3 Scale.musicxml'), { book: 'Alfred 1/Extras', page: '3' });
+});
+
+test('naturalCompare: pages in book order', () => {
+  const files = ['100 C', '12a B', '9 A', '12 B', '12b B'];
+  assert.deepEqual(files.sort(naturalCompare), ['9 A', '12 B', '12a B', '12b B', '100 C']);
+  assert.deepEqual(['Alfred 2', 'Alfred 10', 'Alfred 1'].sort(naturalCompare), ['Alfred 1', 'Alfred 2', 'Alfred 10']);
 });
 
 const found = (path: string, lastModified = 1, size = 100): FoundFile => ({ path, lastModified, size });

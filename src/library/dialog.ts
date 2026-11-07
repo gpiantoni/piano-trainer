@@ -1,4 +1,5 @@
 import { ago } from './scan.ts';
+import { naturalCompare } from '../score/meta.ts';
 import {
   deleteFolder, deleteScore, listFolders, listScores, storageInfo,
   type FolderRecord, type ScoreRecord,
@@ -108,7 +109,9 @@ export class LibraryDialog {
       el('ul', { className: 'lib-list' }, ...folders.map((f) => this.folderRow(f))),
     ] : []));
 
-    const sorted = scores.sort((a, b) => a.title.localeCompare(b.title));
+    // By file, so each book's scores sit together in page order.
+    const file = (s: ScoreRecord) => (s.source.kind === 'folder' ? s.source.path : s.source.name);
+    const sorted = scores.sort((a, b) => naturalCompare(file(a), file(b)));
     this.scores.replaceChildren(
       el('h3', { textContent: `On this device (${scores.length})` }),
       scores.length

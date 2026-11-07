@@ -1,5 +1,6 @@
 import './style.css';
 import { fetchBundled, fetchManifest, layoutScore, loadScore, type ScoreEntry } from './score/load.ts';
+import { bookPlace, naturalCompare } from './score/meta.ts';
 import type { ScoreTiming } from './score/timeline.ts';
 import { CursorMap } from './score/cursor.ts';
 import { listenMidi } from './midi/input.ts';
@@ -25,7 +26,9 @@ app.innerHTML = `
   <header class="bar">
     <div class="row">
       <span class="group l">
+        <span id="book" class="book" hidden></span>
         <select id="picker" aria-label="Score"></select>
+        <button id="next" hidden>▸</button>
         <button id="library">Library</button>
       </span>
       <span class="group m">
@@ -787,6 +790,7 @@ async function layout(mine?: number) {
 
 async function show(entry: ScoreEntry) {
   const mine = ++seq;
+  showBook();
   stopRun();
   review.clear();
   lastRun = undefined;
@@ -848,27 +852,67 @@ picker.onchange = () => {
   if (entry) show(entry);
 };
 
+// ---- books ------------------------------------------------------------------
+
+// A book is a subfolder of a linked folder (score/meta.ts bookPlace). `entries`
+// holds each book in page order, so the next page is the next entry.
+const nextButton = $<HTMLButtonElement>('next');
+
+function nextInBook(): ScoreEntry | undefined {
+  const i = entries.findIndex((e) => e.id === picker.value);
+  const [here, next] = [entries[i], entries[i + 1]];
+  return here?.source === 'device' && here.book && next?.source === 'device' && next.book === here.book
+    ? next : undefined;
+}
+
+// The book of the score in the picker beside it, and ▸ to its next page.
+function showBook() {
+  const entry = entries.find((e) => e.id === picker.value);
+  const book = entry?.source === 'device' ? entry.book : '';
+  $('book').textContent = book;
+  $('book').hidden = nextButton.hidden = !book;
+  nextButton.disabled = !nextInBook();
+  nextButton.title = nextButton.ariaLabel = `Next in ${book}`;
+}
+
+nextButton.onclick = () => {
+  const next = nextInBook();
+  if (!next) return;
+  picker.value = next.id;
+  show(next);
+};
+
 // ---- library ----------------------------------------------------------------
 
 let bundled: ScoreEntry[] = [];
+type DeviceEntry = Extract<ScoreEntry, { source: 'device' }>;
 
-// Scores from the device first (they are the point of the app), then built-in.
+// Scores from the device first (they are the point of the app): the top-level
+// ones by title, then one group per book in page order. Built-in last.
 async function refreshEntries() {
-  let device: ScoreEntry[] = [];
+  let device: DeviceEntry[] = [];
   try {
-    device = (await listScores())
-      .map((s): ScoreEntry => ({
+    device = (await listScores()).map((s): DeviceEntry => {
+      const path = s.source.kind === 'folder' ? s.source.path : s.source.name;
+      return {
         id: s.id, title: s.title, composer: s.composer,
         source: 'device', missing: s.missing, updatedAt: s.updatedAt,
-      }))
-      .sort((a, b) => a.title.localeCompare(b.title));
+        path, ...bookPlace(s.source.kind === 'folder' ? path : ''),
+      };
+    });
   } catch (err) {
     status.textContent = `Could not open the library: ${(err as Error).message}`;
   }
-  entries = [...device, ...bundled];
+  const top = device.filter((e) => !e.book).sort((a, b) => a.title.localeCompare(b.title));
+  const books = new Map<string, DeviceEntry[]>();
+  const inBooks = device.filter((e) => e.book)
+    .sort((a, b) => naturalCompare(a.book, b.book) || naturalCompare(a.path, b.path));
+  for (const e of inBooks) books.set(e.book, [...(books.get(e.book) ?? []), e]);
+  entries = [...top, ...[...books.values()].flat(), ...bundled];
 
   const option = (e: ScoreEntry) => {
-    const label = e.composer ? `${e.title} (${e.composer})` : e.title;
+    let label = e.composer ? `${e.title} (${e.composer})` : e.title;
+    if (e.source === 'device' && e.page) label = `${e.page} · ${label}`;
     return new Option(e.source === 'device' && e.missing ? `${label} (not in folder)` : label, e.id);
   };
   const group = (label: string, list: ScoreEntry[]) => {
@@ -877,10 +921,12 @@ async function refreshEntries() {
     return g;
   };
   picker.replaceChildren(
-    ...(device.length ? [group('On this device', device)] : []),
+    ...(top.length ? [group('On this device', top)] : []),
+    ...[...books].map(([book, list]) => group(book, list)),
     ...(bundled.length ? [group('Built in', bundled)] : []),
   );
   if (loaded) picker.value = loaded.id;
+  showBook();
   $('libHint').hidden = device.length > 0;
 }
 

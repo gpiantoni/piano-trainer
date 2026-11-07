@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Export a MuseScore file to PDF, MIDI, and MusicXML (into export/ next to the
-# score), and print its title, subtitle, composer, and default tempo.
+# Export a MuseScore file to PDF, MIDI, and MusicXML, and print its title,
+# subtitle, composer, and default tempo.
+# The files go into export/ next to the score. A score in a subfolder (a book:
+# "Alfred 1/12 Ode to Joy") goes into the export/ of the folder above, under the
+# same subfolder: export/Alfred 1/. Then one linked folder holds every book.
 # The MusicXML has its repeats unrolled (written out in playing order) for
 # piano-trainer; the PDF and MIDI keep them as written.
 #
@@ -21,11 +24,25 @@ fi
 
 src="${1%.mscz}.mscz"         # extension optional
 name="$(basename -- "$src" .mscz)"
-out="$(dirname -- "$src")/export"
 
 if [[ ! -f "$src" ]]; then
   echo "Error: '$src' not found" >&2
   exit 1
+fi
+
+# The nearest export/ at or above the score's folder (not past $HOME), with the
+# subfolders in between kept; none at all: a new export/ next to the score.
+here="$(cd -- "$(dirname -- "$src")" && pwd)"
+dir="$here"
+sub=""
+while [[ ! -d "$dir/export" && "$dir" != "$HOME" && "$dir" != / ]]; do
+  sub="$(basename -- "$dir")${sub:+/$sub}"
+  dir="$(dirname -- "$dir")"
+done
+if [[ -d "$dir/export" ]]; then
+  out="$dir/export${sub:+/$sub}"
+else
+  out="$here/export"
 fi
 
 mkdir -p "$out"

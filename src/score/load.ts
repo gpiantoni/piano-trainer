@@ -12,7 +12,8 @@ export type ScoreEntry = {
   composer: string;
 } & (
   | { source: 'bundled'; path: string }     // path relative to scores/
-  | { source: 'device'; missing?: boolean; updatedAt: string } // data in IndexedDB (library/db.ts)
+  | { source: 'device'; missing?: boolean; updatedAt: string;  // data in IndexedDB (library/db.ts)
+      path: string; book: string; page: string }              // path in its folder, or the file's name
 );
 
 const scoresUrl = (p: string) => `${import.meta.env.BASE_URL}scores/${p}`;

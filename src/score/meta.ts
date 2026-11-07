@@ -18,6 +18,19 @@ export function scoreKind(fileName: string): ScoreKind | undefined {
 export const baseName = (path: string) =>
   (path.split('/').pop() ?? path).replace(/\.(musicxml|xml|mxl)$/i, '');
 
+// A teaching book is a subfolder of the linked folder, and its file names start
+// with the page: "Alfred 1/12 Ode to Joy.musicxml" -> { book: 'Alfred 1', page: '12' }.
+// "p012", "12a" (two pieces on a page) work too. Top-level files have no book.
+export function bookPlace(path: string): { book: string; page: string } {
+  const slash = path.lastIndexOf('/');
+  if (slash < 0) return { book: '', page: '' };
+  const page = baseName(path).match(/^p?0*(\d+[a-z]?)(?=[\s._-]|$)/i)?.[1] ?? '';
+  return { book: path.slice(0, slash), page };
+}
+
+// Natural order, so page 9 comes before 12, and 12 before 12a and 100.
+export const naturalCompare = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 
 function decode(text: string) {

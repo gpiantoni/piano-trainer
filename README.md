@@ -32,6 +32,12 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   folder first. The library belongs to the origin, so `localhost` and the deployed
   site each have their own.
 
+  **Books**: a subfolder of a linked folder is a book (`Alfred 1/`, `Alfred 2/`),
+  with its own group in the picker, after the top-level scores. A file name that
+  starts with the page (`12 Ode to Joy`, `p012`, `12a` for a second piece on the
+  page) sets its place in the book and shows as `12 · Ode to Joy`. The book's
+  name sits beside the picker, and **▸** opens the next piece in the book.
+
   **Built in** — every `*.musicxml` under `public/scores/`. The files are
   gitignored except `public-domain/`, and `scores/manifest.json` is generated from
   whatever is there, so the deployed build lists only the public-domain pieces.
@@ -110,6 +116,18 @@ symlink in the score folder, `./export.sh "Song Name"` works there:
 ```bash
 ln -s ~/Documents/piano-trainer/scripts/export.sh ~/Documents/MuseScore4/Scores/
 ```
+
+For a book, save its scores in a subfolder named after the book, each file
+starting with its page number, and export from the score folder:
+
+```bash
+./export.sh "Alfred 1/12 Ode to Joy"   # -> export/Alfred 1/12 Ode to Joy.*
+```
+
+A score in a folder without its own `export/` goes into the nearest `export/`
+above it, under the same subfolders, so the linked folder already has the
+book: **Rescan** is enough. The title in MuseScore stays plain "Ode to Joy";
+the page is only in the file name.
 
 The MusicXML has its **repeats unrolled** (`mscore --unroll-repeats`): voltas,
 D.C., D.S. and codas are written out in playing order, so bar numbers run past
