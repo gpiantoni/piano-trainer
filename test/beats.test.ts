@@ -37,3 +37,11 @@ test('6/8 pickup of one beat: its eighths still click', () => {
   assert.deepEqual(beats.map((b) => b.t), [0, 750, 1500]);
   assert.deepEqual(subs, [250, 500, 1000, 1250, 1750, 2000]);
 });
+
+test('3/4 pickup on beat 3: a full bar and two beats, a downbeat on each bar', () => {
+  // Bar 0 holds only beat 3; the count-in reads 1 2 3 1 2.
+  const { countIn: ci } = grid(3, 4, [0, 1], 4);
+  assert.deepEqual(ci.filter((c) => !c.sub).map((c) => [c.t, c.accent]), [
+    [-2500, true], [-2000, false], [-1500, false], [-1000, true], [-500, false],
+  ]);
+});

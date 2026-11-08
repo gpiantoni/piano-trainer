@@ -443,8 +443,9 @@ function drawCursor(scoreMs: number) {
 }
 
 // The count-in as a fixed row of beat numbers, with the eighths between them
-// as dots while the eighth-note click is on. The click just heard lights up, so
-// nothing shifts; before a run the row shows how long the count-in will be.
+// as dots while the eighth-note click is on. Numbers restart at each bar's
+// downbeat, so a 3/4 pickup on beat 3 counts 1 2 3 1 2. The click just heard
+// lights up, so nothing shifts; before a run the row shows how long the count-in will be.
 const count = $('count');
 let countClicks: Click[] = [];
 
@@ -453,7 +454,7 @@ function drawCount() {
   countClicks = clicks.filter((c) => !c.sub || metronome.subdivide).sort((a, b) => a.t - b.t);
   let beat = 0;
   count.replaceChildren(...countClicks.map((c) => Object.assign(document.createElement('span'),
-    c.sub ? { className: 'sub' } : { textContent: String(++beat) })));
+    c.sub ? { className: 'sub' } : { textContent: String(beat = c.accent ? 1 : beat + 1) })));
   lightCount(undefined);
 }
 
