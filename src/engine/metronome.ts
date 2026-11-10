@@ -37,6 +37,12 @@ export class Metronome {
   private sources: { nodes: AudioScheduledSourceNode[]; end: number }[] = [];
   private toAudio = (ms: number) => ms / 1000;
 
+  // Whether prepare() can start sound outside a tap: it already runs, or the
+  // page has had a tap or a key press at some point (a MIDI key is not one).
+  get canStart() {
+    return this.ctx?.state === 'running' || navigator.userActivation?.hasBeenActive !== false;
+  }
+
   // Must be called from a user gesture (tap) the first time: autoplay rules.
   async prepare(): Promise<void> {
     this.ctx ??= new AudioContext({ latencyHint: 'interactive' });

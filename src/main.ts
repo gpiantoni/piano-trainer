@@ -4,7 +4,8 @@ import { bookPlace, naturalCompare } from './score/meta.ts';
 import type { ScoreTiming } from './score/timeline.ts';
 import { CursorMap } from './score/cursor.ts';
 import { listenMidi } from './midi/input.ts';
-import { WaitMode, forHands, noteName, type Feedback } from './engine/waitMode.ts';
+import { WaitMode, forHands, groupChords, noteName, type Feedback } from './engine/waitMode.ts';
+import { OpeningChord } from './engine/opening.ts';
 import { Metronome } from './engine/metronome.ts';
 import { TempoRun } from './engine/tempoRun.ts';
 import { OFFSET_MIN_NOTES, align, runOffset } from './engine/align.ts';
@@ -83,6 +84,7 @@ app.innerHTML = `
   <p id="status" class="status"></p>
   <p id="barsHint" class="status hint" aria-live="polite" hidden></p>
   <p id="libHint" class="status hint" hidden>Add your own scores: <b>Library</b> → Add files or Link folder.</p>
+  <p id="soundHint" class="status hint" hidden>Tap the screen once so the count-in can sound, then play the first chord again.</p>
   <p id="waitFeedback" class="wait-feedback" aria-live="polite" hidden></p>
   <div id="score" class="score"></div>
   <div id="strip" class="strip" hidden></div>
@@ -243,14 +245,28 @@ function onNote(ev: NoteEvent) {
     return;
   }
   if (mode === 'tempo') {
-    run?.record(ev);
+    if (run) run.record(ev);
+    else if (openingChord(ev) && ev.t >= openingFrom) {
+      // A piano key is not a tap: sound can start only once the page has had one.
+      if (metronome.canStart) startRun();
+      else soundHint.hidden = false;
+    }
     return;
   }
   if (!practice) return;
+  // Done, or reviewing a Follow run: only the opening chord does anything. It
+  // starts over and is the first chord played.
+  if (mode === 'wait' ? practice.done : !followRun && review.active) {
+    const presses = openingChord(ev);
+    if (presses) {
+      restart();
+      for (const p of presses) onNote(p);
+    }
+    return;
+  }
   if (mode === 'follow') {
-    // A run starts from the top. Reviewing: nothing until Restart. A run cut
-    // short without a review (Bars, Library): the next key starts over.
-    if (!followRun && review.active) return;
+    // A run starts from the top. A run cut short without a review (Bars,
+    // Library): the next key starts over.
     if (!followRun && (practice.cursor > 0 || practice.wrong > 0)) restart();
     if (!recordFollow(ev)) return;
   }
@@ -323,6 +339,36 @@ function restart() {
   scrollToStart();
 }
 $('restart').onclick = restart;
+
+// ---- starting from the piano ------------------------------------------------
+
+// With no run going (before one, reviewing one, wait mode done), the first
+// chord asked for, all of it down at once and no other key, starts the next:
+// Start in tempo mode, Restart in wait and Follow.
+const opening = new OpeningChord();
+const soundHint = $('soundHint');
+
+// A piece often ends on the chord it opens with. When a tempo run ends by
+// itself, that last chord may still come, late, and would start the next run
+// and clear the review: so the opening chord does nothing for 5 s, or a bar at
+// the run's tempo where that is longer.
+const OPENING_WAIT_MS = 5000;
+let openingFrom = 0;   // performance.now() ms: no tempo run from the opening chord before it
+
+function waitAfter(finished: TempoRun) {
+  const i = timing ? lastAtOrBefore(timing.measures, finished.window.endMs - 1, (m) => m.startMs) : -1;
+  const bar = i >= 0 ? timing!.measures[i] : undefined;
+  return Math.max(OPENING_WAIT_MS, bar ? (bar.endMs - bar.startMs) / finished.speed : 0);
+}
+
+// The events of the opening chord once it is down, or undefined. Every event
+// goes through, so the keys known to be down stay right while a dialog is open.
+function openingChord(ev: NoteEvent): NoteEvent[] | undefined {
+  if (!timing) return;
+  const first = groupChords(practiceEvents(timing).filter(forHands(hands)))[0];
+  const events = opening.handle(first?.events.map((e) => e.pitch) ?? [], ev);
+  return picking || calib.open || library.dialog.open ? undefined : events;
+}
 
 // ---- sections: some bars only ----------------------------------------------
 
@@ -486,6 +532,7 @@ let frame = 0;
 
 async function startRun() {
   if (!timing || run) return;
+  soundHint.hidden = true;
   review.clear();
   lastRun = undefined;
   await metronome.prepare();          // inside the tap: audio may start
@@ -516,6 +563,7 @@ function stopRun() {
   run?.stop();
   run = undefined;
   followRun = undefined;
+  opening.reset();   // keys still down from the run don't count towards the next
   keepAwake();
   startStop.textContent = 'Start';
   startStop.classList.remove('running');
@@ -528,6 +576,8 @@ function finishRun() {
   const finished = run;
   const reachedMusic = finished && finished.scoreTime() > finished.window.startMs;
   const untilMs = finished ? performance.now() - finished.t0 : 0;
+  // Ran out rather than Stop. Asked before stopRun(), after which it reads 'finished' either way.
+  if (finished?.phase() === 'finished') openingFrom = performance.now() + waitAfter(finished);
   stopRun();
   if (!finished || !reachedMusic) return;
   lastRun = {

@@ -83,6 +83,16 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   counts in one bar before it and stops after the last. Remembered per score;
   **✕** goes back to the whole piece.
 
+  **The first chord** starts the next run from the piano whenever none is
+  going: in Tempo it is **Start** (the count-in follows; the chord itself is not
+  recorded), and in Follow (reviewing) and Wait (Done) it is **Restart**, and it
+  counts as the first chord played. All of it has to be down at once, and no
+  other key; with **Bars** or one hand it is that part's first chord, even a
+  single note. When a tempo run ends by itself, the chord waits 5 s (or a bar
+  at the run's tempo, if longer), so a last chord played late, the same as the
+  first, doesn't start the next run over the review. A MIDI key can't start
+  sound on its own, so after loading the page tap it once before a tempo run.
+
   **Both / Left / Right** picks the hand in any mode: the other staff greys
   out and is not asked for. **Full screen** hides the browser bars on the tablet
   and keeps the screen awake, as a tempo or Follow run does while it plays.
