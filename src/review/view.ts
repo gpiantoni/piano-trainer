@@ -52,7 +52,6 @@ export class ReviewView {
   private bpm: number | undefined;   // the run's
   private offset: Offset = { ms: undefined, notes: 0 };
   private follow = false;           // a Follow run: no re-center, its own wording
-  private clicked = false;          // a Follow run with the metronome: the clock moves by whole beats
   private noteEls = new Map<string, Element>();
   private cursorMap: CursorMap | undefined;
   private byNoteId = new Map<string, PlayedNote>();
@@ -84,13 +83,12 @@ export class ReviewView {
   // × beat: how far off a key may be and still count as that note.
   get window() { return windowOf(this.settings); }
 
-  show(alignment: Alignment, speed: number, bpm: number, offset: Offset, follow = false, clicked = false) {
+  show(alignment: Alignment, speed: number, bpm: number, offset: Offset, follow = false) {
     this.alignment = alignment;
     this.speed = speed;
     this.bpm = bpm;
     this.offset = offset;
     this.follow = follow;
-    this.clicked = clicked;
     this.byNoteId = new Map(alignment.notes.flatMap((n) => [n.expected.id, ...n.expected.tiedIds].map((id) => [id, n])));
     this.byPedalId = new Map();
     const sign = (id: string) => this.byPedalId.get(id) ?? this.byPedalId.set(id, {}).get(id)!;
@@ -299,8 +297,7 @@ export class ReviewView {
             className: 'key-legend',
             innerHTML: `<b class="k-arrow">◂ ▸</b> outside ±${pct(s.within)} `
               + (this.follow
-                ? (this.clicked ? '(a whole chord nearer another click: the clock moves to it) ' : '(a whole chord: the clock restarts there) ')
-                  + '<i class="k unmoved"></i>clock started <b class="k-x">×</b> wrong key'
+                ? '(a bar\'s first chord, all of it: the clock restarts there) <i class="k unmoved"></i>clock started <b class="k-x">×</b> wrong key'
                 : '<i class="k unmoved"></i>missed <b class="k-x">×</b> extra key'),
           }),
         );

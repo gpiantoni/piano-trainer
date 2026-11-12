@@ -159,7 +159,7 @@ type LastRun = {
   mode: 'tempo' | 'follow';
   recording: NoteEvent[]; speed: number; latencyMs: number; recordedAt: string; untilMs: number;
   window: PlayWindow;
-  metronome?: boolean;   // Follow: it clicked
+  metronome?: boolean;   // Follow: it clicked; for the record only, the analysis ignores it
 };
 let lastRun: LastRun | undefined;
 // Its median timing offset (real ms, after latencyMs), as re-center uses it.
@@ -636,11 +636,10 @@ function analyse() {
     // Untimed restarts instead of a run-wide offset: no re-center.
     const { recording, speed: runSpeed, window } = lastRun;
     const events = timing.events.filter((ev) => inWindow(window, ev.onMs));
-    const clicked = lastRun.metronome ?? false;
-    const opts = { hands, window, within: review.settings.within, matchBeats: review.window, metronome: clicked };
+    const opts = { hands, window, within: review.settings.within, matchBeats: review.window };
     const a = analyseFollow(events, recording, runSpeed, opts, timing.pedals);
     lastOffset = undefined;
-    review.show(a, runSpeed, runSpeed * scoreBpm(timing), { ms: undefined, notes: 0 }, true, clicked);
+    review.show(a, runSpeed, runSpeed * scoreBpm(timing), { ms: undefined, notes: 0 }, true);
     return;
   }
   const { recenter } = review.settings;
@@ -1067,13 +1066,12 @@ if (import.meta.env.DEV) {
     __review: () => review,
     // Feed a recording as if a run just finished, e.g. from a saved run file.
     // `untilMs` (real ms from t0) simulates stopping a tempo run early.
-    // `clicked`: a Follow run played with the metronome.
-    __replay: (recording: NoteEvent[], runSpeed = speed, untilMs = Infinity, runMode: 'tempo' | 'follow' = 'tempo', clicked = false) => {
+    __replay: (recording: NoteEvent[], runSpeed = speed, untilMs = Infinity, runMode: 'tempo' | 'follow' = 'tempo') => {
       if (mode !== runMode) setMode(runMode);
       if (!timing) return;
       lastRun = {
         mode: runMode, recording, speed: runSpeed, latencyMs: 0, recordedAt: new Date().toISOString(), untilMs,
-        window: playWindow(timing, section), metronome: clicked,
+        window: playWindow(timing, section),
       };
       analyse();
       paint();

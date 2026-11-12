@@ -49,9 +49,9 @@ export type PlayedNote = {
   velocityPct?: number;  // velocity / 127 × 100
   pedal?: boolean;       // sustain pedal down at any time while the key was held
   // Follow: the clock started on this chord (first: played, but untimed, no
-  // deltaMs) or restarted from it (outside: every key outside the criterion).
+  // deltaMs) or restarted from it (outside: a bar's first chord, every key
+  // outside the criterion).
   restart?: 'first' | 'outside';
-  shiftBeats?: number;   // Follow with the metronome: the clock moved on (+) or back (−) this many beats here
 };
 
 // A key press that matched no note in the score.

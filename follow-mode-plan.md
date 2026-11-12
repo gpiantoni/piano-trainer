@@ -1,6 +1,6 @@
 # Plan: Follow mode
 
-Handoff, 2026-10-25. Follow mode is implemented and on `main` (up to `2d98006`), following the principle below. Tests and build pass; nothing of the latest rule has been tried on the piano yet.
+Handoff, 2026-11-12. Follow mode is implemented and on `main`, following the principle below. Since 2026-11-12 only a bar's first chord restarts the clock, and the metronome can click as an aid (see "Bar starts and the metronome"). Tests and build pass.
 
 **Next:**
 1. The user tests on the piano (2026-10-26) with the checklist below, saves runs, and writes what they found under "Piano test".
@@ -22,7 +22,7 @@ Nothing is timed while playing: the keys are only recorded. When the run ends, t
 
 So the review never adapts the clock's tempo to how the run was played, and never fits its starting point to the playing. The only things that move the clock are the first chord and chords counted as errors.
 
-**There are no pauses or stops: only chords too early or too late** (decided 2026-10-25). A chord with every key outside the criterion is marked ◂ or ▸ and the clock restarts from it, so drift builds up to the criterion and no further, and every restart is visible as a mark. A stop is just a very late chord.
+**There are no pauses or stops: only chords too early or too late** (decided 2026-10-25). A bar's first chord with every key outside the criterion is marked ◂ or ▸ and the clock restarts from it (bar starts only since 2026-11-12), so drift builds up through a bar and is reset at most once a bar, and every restart is visible as a mark. A stop is just a very late chord.
 
 ## Rules (decided)
 
@@ -32,13 +32,13 @@ So the review never adapts the clock's tempo to how the run was played, and neve
 | Clock | `expected(chord) = anchor.realMs + (chord.onMs − anchor.onMs) / speed`. `onMs` already contains the score's written tempo changes. |
 | Anchor | The first chord played. Afterwards, every restart chord. Nothing else ever moves the clock. |
 | Counted press | The press that completed the chord: a re-struck key counts with the press still down when the chord completed. |
-| Restart | Every key of the chord outside the criterion on the same side: `min(keys) − expected > tol` (late) or `max(keys) − expected < −tol` (early), `tol = within × chord.beatMs / speed`. One key inside keeps the clock (a hand found late reads late, the clock stays). |
+| Restart | Only a bar's first chord (the first chord asked for in its measure), with every key outside the criterion on the same side: `min(keys) − expected > tol` (late) or `max(keys) − expected < −tol` (early), `tol = within × chord.beatMs / speed`. One key inside keeps the clock (a hand found late reads late, the clock stays). |
 | First chord | Untimed: `played`, no `deltaMs`, grey on the Notes layer, `restart: 'first'`. There is no clock before it. |
 | Restart chord | Timed against the clock that was running, so marked ◂ or ▸. `restart: 'outside'`; the popover adds "clock restarted here". The clock then restarts from its earliest key. |
 | Per-note timing | Each note is timed on its own: `deltaMs = noteOnset − expected(chord)`, so the spread between the hands shows. Beyond the match window (`windowOf`: 0.5 beat at ±20 %, 0.3 at ±10 %), early or late, the colour clamps at full. |
 | On time | The review criterion (`within`): ±10 % or ±20 % of a beat. It also decides the restarts. |
 | Notes summary | `W / T within ±20 % · E early · L late · X wrong keys · at 50 bpm · 1 beat = 1200 ms`. No pause count, no median. "at N bpm" is the run's bpm, in Follow and Tempo. |
-| Legend | `◂ ▸ outside ±20 % (a whole chord: the clock restarts there) · ■ clock started · × wrong key`. |
+| Legend | `◂ ▸ outside ±20 % (a bar's first chord, all of it: the clock restarts there) · ■ clock started · × wrong key`. |
 | Velocity | Always measured. |
 | Duration | `heldMs` from real times. `durationPct = heldMs / ((offMs − onMs) / speed)`, always, also for a key held through a restart. |
 | End of the run | When the last chord completes, recording goes on until every key is up, then the review shows. Stop (or Space) ends at once. |
@@ -51,17 +51,19 @@ So the review never adapts the clock's tempo to how the run was played, and neve
 
 The analysis is a pure function re-run on every criterion change (the criterion decides the restarts).
 
-## The metronome in Follow (2026-11-12)
+## Bar starts and the metronome (decided 2026-11-12)
 
-The user asked: "in follow mode, allow the metronome as well … I can turn it on or off (and on also eights or not). The idea is that if I miss the beat, then I wait for the following beat."
+**Only a bar's first chord restarts the clock.** The 20:16 run (45 bpm, no metronome) was rushed steadily, about 30 % of a beat early every beat (≈ 64 bpm). With any chord allowed to restart, nearly every beat restarted and read −30, so the rushing didn't show: "I *thought* that the clock resets only at the first beat … did I get confused?" With bar starts the bar reads −15 −31 −47 −64 −81 and its downbeat about −110 % (a beat early per bar). Accepted cost: a stop mid-bar leaves the rest of that bar late (bar 6: 226, then 111 and 74).
+
+**The metronome is an aid only; the analysis ignores it** ("I thought that the metronome is only an aid during execution, but it does not affect the computation at the end?"). A first version (`5425efd`) moved the clock by whole beats to the nearest click; removed as too confusing: one rule, metronome on or off.
 
 | Thing | Rule |
 |---|---|
-| Switch | 🔔 and ♩/♫ shown in Follow too, shared with Tempo (same stored setting). No count-in. |
+| Switch | 🔔 and ♩/♫ in Follow too, shared with Tempo (same stored setting). No count-in. |
 | Clicks | From the first chord (its earliest key) on, on the score's beats at the run's bpm, never waiting. Past the score's end, bars of its last meter. They stop when the run ends. Without a tap yet, the first key shows the "tap once" hint and doesn't start the run. |
-| Clock | With the metronome, a chord all outside the criterion moves the clock by whole beats, `k = round((min(keys) − expected) / beat)`, to the click nearest the chord; `k = 0` keeps the clock (marked ◂ ▸, no restart). The chord is timed against the clock that was running, as before. Without it, unchanged. |
-| Review | `shiftBeats` on the chord's notes; popover "clock moved on 1 beat, to the click"; legend "(a whole chord nearer another click: the clock moves to it)". The saved run has `metronome: true`; `__replay(rec, speed, Infinity, 'follow', true)`. |
-| Latency | Still not applied. The clicks follow the first key as received, so the input latency of later keys no longer fully cancels out: a few ms late at most with MIDI. Not yet tried on the piano. |
+| Saved run | `metronome: true/false`, for the record only. |
+
+The 20:16 run, ±20 %: any chord restarts → within 319, early 418, late 140, 203 restarts; bar starts → within 210, early 471, late 196, 74 restarts (878 notes). At ±10 %: 332 → 75 restarts.
 
 ## Where the code stands (main, 2026-10-25)
 
@@ -74,6 +76,8 @@ The user asked: "in follow mode, allow the metronome as well … I can turn it o
 | `2a90ceb` | A pause chord (later than the match window) is timed late against the clock that was running, then restarts it. Only the first chord is grey. No median in the Follow summary. |
 | `1678bee` | `scripts/replay-follow.mjs`: replays saved runs and prints the Reference data table. |
 | `2d98006` | No pauses: a chord all outside the criterion, early or late, restarts the clock. No pause count; no special case for notes or pedals held through a restart; a pedal pressed while late reads late. `FollowOptions`: `within` and `matchBeats` instead of `pauseBeats`. |
+| `5425efd` | The metronome in Follow, with clicks moving the clock (removed in the next commit). |
+| next | Only a bar's first chord restarts the clock; the metronome an aid only. |
 
 Where Follow lives:
 - `src/engine/waitMode.ts`: `completions` (the counted press of each completed chord) and `wrongs`.

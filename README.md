@@ -50,17 +50,17 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   **Follow mode**: plays exactly like wait mode, but the run
   is timed afterwards against a clock at the set bpm (−/+). The clock starts on
   the first chord (grey, untimed) and is never nudged towards you, so dragging
-  or rushing shows, up to the criterion: a chord with every key outside it,
-  early or late, is marked ◂ or ▸ and the clock restarts from it. A stop is just
-  a late chord. The run ends when the last chord is let go (or **Stop**), then
+  or rushing builds up through the bar: a bar's first chord with every key
+  outside the criterion, early or late, is marked ◂ or ▸ and the clock restarts
+  from it. A stop is just a late chord; a stop mid-bar leaves the rest of that
+  bar late. The run ends when the last chord is let go (or **Stop**), then
   shows the same review as tempo mode, with the wrong keys in the summary. On
   time is the review's criterion (±10 or ±20 %), which also decides where the
   clock restarts; there is no re-center, and latency calibration is not needed. The
   bpm is the one set when the run started: −/+ afterwards is for the next run.
   With 🔔 on (♫ for eighths), the metronome starts on the first chord at that
-  bpm and clicks on without waiting: if you miss a beat, come in on the next
-  click. A chord off the clock and nearer another click then moves the clock by
-  whole beats, to that click, rather than to the chord. **Restart** to play again.
+  bpm and clicks on without waiting, as an aid only: the review is the same with
+  it on or off. **Restart** to play again.
 
   **Tempo mode**: pick a tempo (−/+ in steps of 5 bpm; shown as bpm · % of the
   score's tempo · one beat in ms, remembered per score), **Start** (or Space), one bar of count-in clicks,

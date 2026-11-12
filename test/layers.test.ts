@@ -61,9 +61,9 @@ test('counts cover every expected note, missed ones included', () => {
 test('Follow: the first chord is grey and untimed, a stop is late; wrong keys in the summary, no median, no re-center', () => {
   const events: ExpectedEvent[] = [0, 1, 2, 3].map((i) => ({
     id: `n${i}`, tiedIds: [], pitch: 60 + i, staff: 1,
-    onMs: i * BEAT, offMs: (i + 1) * BEAT, beatMs: BEAT, measure: 0,
+    onMs: i * BEAT, offMs: (i + 1) * BEAT, beatMs: BEAT, measure: Math.floor(i / 2),
   }));
-  // n2 after a stop, n3 10 % late; a wrong key while n3 is asked for.
+  // Two beats a bar. n2, a bar's first chord, after a stop; n3 10 % late; a wrong key while n3 is asked for.
   const recording: NoteEvent[] = [[60, 0], [61, 500], [62, 2500], [70, 2700], [63, 3050]].flatMap(([pitch, t]) => [
     { type: 'on' as const, pitch, velocity: 64, t },
     { type: 'off' as const, pitch, velocity: 0, t: t + 100 },
