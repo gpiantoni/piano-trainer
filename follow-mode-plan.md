@@ -51,6 +51,18 @@ So the review never adapts the clock's tempo to how the run was played, and neve
 
 The analysis is a pure function re-run on every criterion change (the criterion decides the restarts).
 
+## The metronome in Follow (2026-11-12)
+
+The user asked: "in follow mode, allow the metronome as well … I can turn it on or off (and on also eights or not). The idea is that if I miss the beat, then I wait for the following beat."
+
+| Thing | Rule |
+|---|---|
+| Switch | 🔔 and ♩/♫ shown in Follow too, shared with Tempo (same stored setting). No count-in. |
+| Clicks | From the first chord (its earliest key) on, on the score's beats at the run's bpm, never waiting. Past the score's end, bars of its last meter. They stop when the run ends. Without a tap yet, the first key shows the "tap once" hint and doesn't start the run. |
+| Clock | With the metronome, a chord all outside the criterion moves the clock by whole beats, `k = round((min(keys) − expected) / beat)`, to the click nearest the chord; `k = 0` keeps the clock (marked ◂ ▸, no restart). The chord is timed against the clock that was running, as before. Without it, unchanged. |
+| Review | `shiftBeats` on the chord's notes; popover "clock moved on 1 beat, to the click"; legend "(a whole chord nearer another click: the clock moves to it)". The saved run has `metronome: true`; `__replay(rec, speed, Infinity, 'follow', true)`. |
+| Latency | Still not applied. The clicks follow the first key as received, so the input latency of later keys no longer fully cancels out: a few ms late at most with MIDI. Not yet tried on the piano. |
+
 ## Where the code stands (main, 2026-10-25)
 
 | Commit | What |

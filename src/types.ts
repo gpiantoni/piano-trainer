@@ -51,6 +51,7 @@ export type PlayedNote = {
   // Follow: the clock started on this chord (first: played, but untimed, no
   // deltaMs) or restarted from it (outside: every key outside the criterion).
   restart?: 'first' | 'outside';
+  shiftBeats?: number;   // Follow with the metronome: the clock moved on (+) or back (−) this many beats here
 };
 
 // A key press that matched no note in the score.

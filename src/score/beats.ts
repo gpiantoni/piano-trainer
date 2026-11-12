@@ -171,6 +171,26 @@ export function countIn(measures: Measure[], beats: Beat[], map: TimemapEntry[])
   return out;
 }
 
+// The clicks of a metronome that runs until stopped, in [from, to) score ms:
+// the score's beats and subdivisions, then, past its end, bars of its last
+// meter at its last tempo, the first starting where the score ends.
+export function clicksBetween(measures: Measure[], beats: Beat[], subs: number[], from: number, to: number): { t: number; accent: boolean; sub?: boolean }[] {
+  const m = measures.at(-1);
+  if (!m) return [];
+  const end = Math.min(to, m.endMs);
+  const out: { t: number; accent: boolean; sub?: boolean }[] = [
+    ...beats.filter((b) => b.t >= from && b.t < end).map((b) => ({ t: b.t, accent: b.downbeat })),
+    ...subs.filter((t) => t >= from && t < end).map((t) => ({ t, accent: false, sub: true })),
+  ];
+  const perBar = beatsPerBar(m.meter), n = subsPerBeat(m.meter);
+  const step = (m.endMs - m.startMs) / ((m.endQ - m.startQ) / beatQ(m.meter)) / n;
+  for (let k = Math.max(0, Math.ceil((from - m.endMs) / step - EPS)); m.endMs + k * step < to; k++) {
+    const t = m.endMs + k * step;
+    out.push(k % n ? { t, accent: false, sub: true } : { t, accent: (k / n) % perBar === 0 });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
 // Index of the last item whose time is <= t (or -1).
 export function lastAtOrBefore<T>(items: T[], t: number, time: (x: T) => number): number {
   let lo = 0, hi = items.length - 1, found = -1;

@@ -8,13 +8,16 @@ import { lastAtOrBefore } from '../score/beats.ts';
 // towards the player, so drift shows, up to the criterion: a chord all outside
 // it, early or late, is timed against the clock that was running and the clock
 // restarts from it. A stop is just a late chord. Only the first chord is
-// untimed. Pure: no DOM, no clock.
+// untimed. With the metronome, which clicks on from the first chord and never
+// waits, a chord off the clock moves it by whole beats, to the click nearest
+// the chord: missing a beat means coming in on a later one. Pure: no DOM, no clock.
 
 export type FollowOptions = {
   hands: Hands;
   window: { startMs: number; endMs: number };   // the section, as in align; only the pedal needs it
   within: number;                                // × beat: the review's criterion; a chord all outside it restarts the clock
   matchBeats: number;                            // × beat: the review's match window, for the pedal
+  metronome?: boolean;                           // it clicked, from the first chord on: the clock moves by whole beats
 };
 
 // Where the clock (re)started: real ms, and the chord's score ms.
@@ -38,6 +41,7 @@ export function analyseFollow(
   // an anchor only, a chord all outside the criterion is timed and then an anchor.
   const anchors: Anchor[] = [];
   const restart = new Map<number, 'first' | 'outside'>();   // chord index → why the clock (re)started there
+  const shift = new Map<number, number>();                  // chord index → beats the clock moved there, with the metronome
   const expectedAt = new Map<number, number>();             // chord index → real ms
   for (const c of done) {
     const chord = wait.chords[c.chord];
@@ -49,6 +53,17 @@ export function analyseFollow(
       expectedAt.set(c.chord, at);
       // Every key late, or every key early: one key inside keeps the clock.
       if (Math.min(...times) - at <= tol && Math.max(...times) - at >= -tol) continue;
+      if (opts.metronome) {
+        // To the click nearest the earliest key; the clock only moves forwards.
+        const beat = chord.events[0].beatMs / speed;
+        let k = Math.round((Math.min(...times) - at) / beat);
+        while (k < 0 && at + k * beat <= a.realMs) k++;
+        if (k === 0) continue;
+        anchors.push({ realMs: at + k * beat, onMs: chord.onMs });
+        restart.set(c.chord, 'outside');
+        shift.set(c.chord, k);
+        continue;
+      }
     }
     anchors.push({ realMs: Math.min(...times), onMs: chord.onMs });
     restart.set(c.chord, a ? 'outside' : 'first');
@@ -75,6 +90,7 @@ export function analyseFollow(
     const written = (expected.offMs - expected.onMs) / speed;
     const heldMs = key?.off === undefined ? undefined : key.off - key.on;
     const why = restart.get(c.chord);
+    const moved = shift.get(c.chord);
     return {
       expected,
       status: 'played',
@@ -87,6 +103,7 @@ export function analyseFollow(
       velocityPct: (press.velocity / 127) * 100,
       pedal: key?.pedal ?? false,
       ...(why ? { restart: why } : {}),
+      ...(moved ? { shiftBeats: moved } : {}),
     };
   }));
 

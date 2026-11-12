@@ -294,6 +294,9 @@ export function summary(a: Alignment, s: ReviewSettings, c: Context): string {
 const NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
 export const pitchName = (p: number) => `${NAMES[p % 12]}${Math.floor(p / 12) - 1}`;
 
+// Follow with the metronome: where the clock went at a chord off it.
+const clockMoved = (k: number) => `clock moved ${k > 0 ? 'on' : 'back'} ${Math.abs(k)} beat${Math.abs(k) === 1 ? '' : 's'}, to the click`;
+
 // Everything about one note at once, for the tap popover.
 export function describe(n: PlayedNote, s: ReviewSettings, c: Context): string {
   const name = pitchName(n.expected.pitch);
@@ -303,7 +306,7 @@ export function describe(n: PlayedNote, s: ReviewSettings, c: Context): string {
   const parts = [
     name,
     n.restart === 'first' ? 'clock started here' : ((t) => `${signed(t.ms)} ms (${signed(t.pct)} % of beat)`)(timing(n, c)),
-    ...(n.restart === 'outside' ? ['clock restarted here'] : []),
+    ...(n.restart === 'outside' ? [n.shiftBeats ? clockMoved(n.shiftBeats) : 'clock restarted here'] : []),
     n.heldMs === undefined ? 'still held' : `held ${n.heldMs.toFixed(0)} ms (${n.durationPct?.toFixed(0) ?? '—'} %)`,
     `vel ${n.velocityPct!.toFixed(0)} %`,
   ];

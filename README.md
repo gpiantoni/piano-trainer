@@ -47,7 +47,7 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   chord played one note at a time doesn't count. A wrong key flashes the notes
   not yet down red and does not advance.
 
-  **Follow mode**: plays exactly like wait mode, with no metronome, but the run
+  **Follow mode**: plays exactly like wait mode, but the run
   is timed afterwards against a clock at the set bpm (−/+). The clock starts on
   the first chord (grey, untimed) and is never nudged towards you, so dragging
   or rushing shows, up to the criterion: a chord with every key outside it,
@@ -57,7 +57,10 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   time is the review's criterion (±10 or ±20 %), which also decides where the
   clock restarts; there is no re-center, and latency calibration is not needed. The
   bpm is the one set when the run started: −/+ afterwards is for the next run.
-  **Restart** to play again.
+  With 🔔 on (♫ for eighths), the metronome starts on the first chord at that
+  bpm and clicks on without waiting: if you miss a beat, come in on the next
+  click. A chord off the clock and nearer another click then moves the clock by
+  whole beats, to that click, rather than to the chord. **Restart** to play again.
 
   **Tempo mode**: pick a tempo (−/+ in steps of 5 bpm; shown as bpm · % of the
   score's tempo · one beat in ms, remembered per score), **Start** (or Space), one bar of count-in clicks,

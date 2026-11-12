@@ -84,6 +84,30 @@ test('early restarts the clock too', () => {
   near(byId(a.notes, 'n3').deltaMs, 0);
 });
 
+test('metronome: a beat missed is played on the next click, and the clock moves on a beat', () => {
+  const clicked = { ...OPTS, metronome: true };
+  const a = analyseFollow(melody(5), playAt([0, 500, 1520, 2010, 2500]), 1, clicked);
+  const n2 = byId(a.notes, 'n2');
+  assert.equal(n2.restart, 'outside');
+  assert.equal(n2.shiftBeats, 1);
+  near(n2.deltaPct, 104, 'late against the clock that was running');
+  near(byId(a.notes, 'n3').deltaMs, 10, 'on the click, not on the chord');
+  near(byId(a.notes, 'n4').deltaMs, 0);
+});
+
+test('metronome: off the click but nearest it, the clock stays', () => {
+  const a = analyseFollow(melody(4), playAt([0, 500, 1200, 1500]), 1, { ...OPTS, metronome: true });
+  near(byId(a.notes, 'n2').deltaPct, 40);
+  assert.equal(restarts(a.notes), 0);
+  near(byId(a.notes, 'n3').deltaMs, 0);
+});
+
+test('metronome: early by most of a beat moves the clock back', () => {
+  const a = analyseFollow(melody(4), playAt([0, 500, 650, 1150]), 1, { ...OPTS, metronome: true });
+  assert.equal(byId(a.notes, 'n2').shiftBeats, -1);
+  near(byId(a.notes, 'n3').deltaMs, 150, 'the clock moved back to 500, not to the chord');
+});
+
 test('each note of a chord is timed on its own', () => {
   const score = [note('l0', 48, 0, 2), note('r0', 60, 0), note('l1', 50, 500, 2), note('r1', 62, 500)];
   const a = analyseFollow(score, rec(key(48, 0), key(60, 0), key(50, 480), key(62, 520)), 1, OPTS);

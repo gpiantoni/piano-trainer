@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildBeats, buildMeasures, buildSubdivisions, countIn } from '../src/score/beats.ts';
+import { buildBeats, buildMeasures, buildSubdivisions, clicksBetween, countIn } from '../src/score/beats.ts';
 import type { TimemapEntry } from '../src/score/beats.ts';
 
 // A quarter note is 500 ms (♩ = 120) throughout; bar starts at the given qstamps.
@@ -44,4 +44,15 @@ test('3/4 pickup on beat 3: a full bar and two beats, a downbeat on each bar', (
   assert.deepEqual(ci.filter((c) => !c.sub).map((c) => [c.t, c.accent]), [
     [-2500, true], [-2000, false], [-1500, false], [-1000, true], [-500, false],
   ]);
+});
+
+test('a metronome that runs on: the score\'s clicks, then its last bar over and over', () => {
+  const { measures, beats, subs } = grid(3, 4, [0, 3], 6);   // two bars of 3/4, ending at 3000 ms
+  const clicks = clicksBetween(measures, beats, subs, 2000, 4600);
+  assert.deepEqual(clicks.map((c) => [c.t, c.accent, !!c.sub]), [
+    [2000, false, false], [2250, false, true], [2500, false, false], [2750, false, true],
+    [3000, true, false], [3250, false, true], [3500, false, false], [3750, false, true],
+    [4000, false, false], [4250, false, true], [4500, true, false],
+  ]);
+  assert.deepEqual(clicksBetween(measures, beats, subs, 3600, 4100).map((c) => c.t), [3750, 4000], 'from inside the extension');
 });

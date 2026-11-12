@@ -20,7 +20,7 @@ import {
   formatSection, inWindow, parseSection, playWindow, sectionFrom, sectionLabel,
   type Click, type PlayWindow, type Section,
 } from './score/section.ts';
-import { lastAtOrBefore } from './score/beats.ts';
+import { clicksBetween, lastAtOrBefore } from './score/beats.ts';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
@@ -84,7 +84,7 @@ app.innerHTML = `
   <p id="status" class="status"></p>
   <p id="barsHint" class="status hint" aria-live="polite" hidden></p>
   <p id="libHint" class="status hint" hidden>Add your own scores: <b>Library</b> → Add files or Link folder.</p>
-  <p id="soundHint" class="status hint" hidden>Tap the screen once so the count-in can sound, then play the first chord again.</p>
+  <p id="soundHint" class="status hint" hidden>Tap the screen once so the metronome can sound, then play the first chord again.</p>
   <p id="waitFeedback" class="wait-feedback" aria-live="polite" hidden></p>
   <div id="score" class="score"></div>
   <div id="strip" class="strip" hidden></div>
@@ -144,7 +144,12 @@ let run: TempoRun | undefined;
 // A Follow run: played like wait mode, every event recorded (t in real ms from
 // its first) and timed afterwards at `speed`, the bpm when it started. `down`:
 // keys held now; the run ends when the last chord is done and they are all up.
-let followRun: { t0: number; speed: number; recording: NoteEvent[]; down: Set<number> } | undefined;
+// `clicked`: the metronome was on; `clock`: its clicks, once the first chord
+// is down (`anchor`: its earliest key, real ms; `until`: score ms scheduled so far).
+let followRun: {
+  t0: number; speed: number; recording: NoteEvent[]; down: Set<number>; clicked: boolean;
+  clock?: { anchor: number; onMs: number; until: number; timer: number };
+} | undefined;
 let cursorMap: CursorMap | undefined;
 let latencyMs = Number(store.get('latencyMs')) || 0;
 let section: Section | undefined;   // some bars only; remembered per score
@@ -154,6 +159,7 @@ type LastRun = {
   mode: 'tempo' | 'follow';
   recording: NoteEvent[]; speed: number; latencyMs: number; recordedAt: string; untilMs: number;
   window: PlayWindow;
+  metronome?: boolean;   // Follow: it clicked
 };
 let lastRun: LastRun | undefined;
 // Its median timing offset (real ms, after latencyMs), as re-center uses it.
@@ -271,6 +277,7 @@ function onNote(ev: NoteEvent) {
     if (!recordFollow(ev)) return;
   }
   const out = practice.handle(ev);
+  if (mode === 'follow' && followRun?.clicked && !followRun.clock && practice.completions.length) startFollowClicks();
   // Follow ends once the last chord is let go, so its durations are measured.
   if (mode === 'follow' && practice.done && followRun?.down.size === 0) return finishFollow();
   if (out.length === 0) return;
@@ -287,7 +294,11 @@ function onNote(ev: NoteEvent) {
 function recordFollow(ev: NoteEvent): boolean {
   if (!followRun) {
     if (ev.type === 'off' || (ev.type === 'pedal' && !ev.down)) return false;
-    followRun = { t0: ev.t, speed, recording: [], down: new Set() };
+    // A piano key is not a tap: sound can start only once the page has had one.
+    if (metronome.enabled && !metronome.canStart) { soundHint.hidden = false; return false; }
+    soundHint.hidden = true;
+    if (metronome.enabled) void metronome.prepare();
+    followRun = { t0: ev.t, speed, recording: [], down: new Set(), clicked: metronome.enabled };
     startStop.textContent = 'Stop';
     startStop.classList.add('running');
     startStop.hidden = false;
@@ -299,6 +310,29 @@ function recordFollow(ev: NoteEvent): boolean {
   return true;
 }
 
+// Follow with the metronome: from the first chord on, clicks on the score's
+// beats at the run's bpm, on and on until the run ends. They never wait: a
+// beat missed is played on a later one.
+const FOLLOW_AHEAD_MS = 1000;   // clicks handed to the metronome this far ahead
+
+function startFollowClicks() {
+  const f = followRun!, first = practice!.completions[0];
+  const anchor = Math.min(...[...first.presses.values()].map((p) => p.t));
+  const onMs = practice!.chords[first.chord].onMs;
+  f.clock = { anchor, onMs, until: onMs + (performance.now() - anchor) * f.speed, timer: window.setInterval(followClicks, 250) };
+  followClicks();
+}
+
+function followClicks() {
+  const f = followRun;
+  if (!f?.clock || !timing) return;
+  const { anchor, onMs, until } = f.clock;
+  const to = onMs + (performance.now() + FOLLOW_AHEAD_MS - anchor) * f.speed;
+  f.clock.until = to;
+  metronome.extend(clicksBetween(timing.measures, timing.beats, timing.subdivisions, until, to)
+    .map((c) => ({ at: anchor + (c.t - onMs) / f.speed, accent: c.accent, always: false, sub: c.sub })));
+}
+
 // The last chord let go, or Stop: review the chords played so far.
 function finishFollow() {
   const finished = followRun;
@@ -308,6 +342,7 @@ function finishFollow() {
   lastRun = {
     mode: 'follow', recording: finished.recording, speed: finished.speed, untilMs: Infinity,
     latencyMs: 0, recordedAt: new Date().toISOString(), window: playWindow(timing, section),
+    metronome: finished.clicked,
   };
   analyse();
   paint();
@@ -562,6 +597,7 @@ function stopRun() {
   metronome.stop();
   run?.stop();
   run = undefined;
+  clearInterval(followRun?.clock?.timer);
   followRun = undefined;
   opening.reset();   // keys still down from the run don't count towards the next
   keepAwake();
@@ -600,10 +636,11 @@ function analyse() {
     // Untimed restarts instead of a run-wide offset: no re-center.
     const { recording, speed: runSpeed, window } = lastRun;
     const events = timing.events.filter((ev) => inWindow(window, ev.onMs));
-    const opts = { hands, window, within: review.settings.within, matchBeats: review.window };
+    const clicked = lastRun.metronome ?? false;
+    const opts = { hands, window, within: review.settings.within, matchBeats: review.window, metronome: clicked };
     const a = analyseFollow(events, recording, runSpeed, opts, timing.pedals);
     lastOffset = undefined;
-    review.show(a, runSpeed, runSpeed * scoreBpm(timing), { ms: undefined, notes: 0 }, true);
+    review.show(a, runSpeed, runSpeed * scoreBpm(timing), { ms: undefined, notes: 0 }, true, clicked);
     return;
   }
   const { recenter } = review.settings;
@@ -669,7 +706,9 @@ function setClick(on: boolean) {
   store.set('click', on ? 'on' : 'off');
   clickButton.setAttribute('aria-checked', String(on));
   clickButton.textContent = on ? '🔔' : '🔕';
-  clickButton.title = on ? 'Metronome on (count-in always clicks)' : 'Metronome off (count-in still clicks)';
+  clickButton.title = mode === 'follow'
+    ? (on ? 'Metronome on, from the first chord' : 'Metronome off')
+    : (on ? 'Metronome on (count-in always clicks)' : 'Metronome off (count-in still clicks)');
 }
 clickButton.onclick = () => setClick(!metronome.enabled);
 
@@ -777,9 +816,10 @@ function setMode(next: Mode) {
   store.set('mode', mode);
   for (const b of modeButtons) b.setAttribute('aria-checked', String(b.dataset.mode === mode));
   $('restart').hidden = mode === 'tempo';
-  // Follow keeps the bpm only: no metronome, and latency cancels out.
+  // Follow: the bpm and the metronome; latency cancels out.
   $('tempoControls').hidden = mode === 'wait';
-  for (const id of ['click', 'subdivide', 'latency']) $(id).hidden = mode !== 'tempo';
+  $('latency').hidden = mode !== 'tempo';
+  setClick(metronome.enabled);   // its title names the mode's
   startStop.hidden = mode !== 'tempo';
   waitFeedback.hidden = mode === 'tempo';
   restart();
@@ -1027,12 +1067,13 @@ if (import.meta.env.DEV) {
     __review: () => review,
     // Feed a recording as if a run just finished, e.g. from a saved run file.
     // `untilMs` (real ms from t0) simulates stopping a tempo run early.
-    __replay: (recording: NoteEvent[], runSpeed = speed, untilMs = Infinity, runMode: 'tempo' | 'follow' = 'tempo') => {
+    // `clicked`: a Follow run played with the metronome.
+    __replay: (recording: NoteEvent[], runSpeed = speed, untilMs = Infinity, runMode: 'tempo' | 'follow' = 'tempo', clicked = false) => {
       if (mode !== runMode) setMode(runMode);
       if (!timing) return;
       lastRun = {
         mode: runMode, recording, speed: runSpeed, latencyMs: 0, recordedAt: new Date().toISOString(), untilMs,
-        window: playWindow(timing, section),
+        window: playWindow(timing, section), metronome: clicked,
       };
       analyse();
       paint();
