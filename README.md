@@ -86,6 +86,14 @@ npm test         # alignment, calibration, library and section tests (Node, no b
   counts in one bar before it and stops after the last. Remembered per score;
   **✕** goes back to the whole piece.
 
+  **A pickup** (a first bar shorter than its meter) counts in one full bar plus
+  the beats the pickup is missing, numbered from each downbeat: a 3/4 pickup of
+  three eighths (& of 2, 3, & of 3) counts **1 2 3 | 1 2**. With ♫ on, the count
+  row shows an "and" after the last 2: that "and" *is* the first note, so play
+  it on that last click, not after it. It never lights up (the run is already
+  playing) and may click twice, once from the count-in and once from the
+  pickup's own eighths; known, and harmless (Idea 10, run of 2026-11-14).
+
   **The first chord** starts the next run from the piano whenever none is
   going: in Tempo it is **Start** (the count-in follows; the chord itself is not
   recorded), and in Follow (reviewing) and Wait (Done) it is **Restart**, and it
@@ -147,6 +155,13 @@ D.C., D.S. and codas are written out in playing order, so bar numbers run past
 the printed ones. Verovio would play the repeats of a written-out score too, but
 gives the second pass note ids it never draws, so the cursor and the review
 colours have nothing to land on. The PDF and MIDI keep the repeats as written.
+
+A score that opens with rests before its first note should get a real
+**pickup bar** before export, or the count-in runs over the rests. In MuseScore:
+delete the leading rests, shorten the bar to what is left (Measure properties →
+Actual duration, e.g. 3/8 in 3/4) and tick *Exclude from measure count*. The
+MusicXML then has `<measure number="0" implicit="yes">`, which the app reads
+as a pickup.
 
 ## Stack
 
